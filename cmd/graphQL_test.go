@@ -100,3 +100,66 @@ func TestParseVar(t *testing.T) {
 	_, _, err = parseVar("noequalsign")
 	assert.Error(t, err)
 }
+
+// decodeResponse parses a GraphQL `data` payload the way the command receives it.
+func decodeResponse(t *testing.T, body string) interface{} {
+	var data interface{}
+	assert.NoError(t, json.Unmarshal([]byte(body), &data))
+	return data
+}
+
+func TestCollectUserErrors_None(t *testing.T) {
+	data := decodeResponse(t, `{"startSlotPipeline": {"pipeline": {"id": "p1"}, "errors": []}}`)
+
+	assert.Empty(t, collectUserErrors(data))
+}
+
+// A refused mutation arrives as ordinary data with a 200, so this is the only
+// thing standing between it and an exit code of 0.
+func TestCollectUserErrors_Refused(t *testing.T) {
+	data := decodeResponse(t, `{"startSlotPipeline": {"pipeline": null, "errors": [{"message": "Build is not eligible"}]}}`)
+
+	assert.Equal(t, []string{"startSlotPipeline: Build is not eligible"}, collectUserErrors(data))
+}
+
+func TestCollectUserErrors_NullErrors(t *testing.T) {
+	data := decodeResponse(t, `{"startSlotPipeline": {"pipeline": {"id": "p1"}, "errors": null}}`)
+
+	assert.Empty(t, collectUserErrors(data))
+}
+
+// Several mutations can be sent in one request; each one's messages are
+// attributed to the field that carried them, in a stable order.
+func TestCollectUserErrors_MultiplePayloads(t *testing.T) {
+	data := decodeResponse(t, `{
+		"zebra": {"errors": [{"message": "last alphabetically"}]},
+		"alpha": {"errors": [{"message": "first"}, {"message": "second"}]}
+	}`)
+
+	assert.Equal(t, []string{
+		"alpha: first",
+		"alpha: second",
+		"zebra: last alphabetically",
+	}, collectUserErrors(data))
+}
+
+// A query response carries no payloads at all and must not be mistaken for a
+// failure.
+func TestCollectUserErrors_QueryResponse(t *testing.T) {
+	data := decodeResponse(t, `{"projects": [{"id": "1", "name": "ontrack"}]}`)
+
+	assert.Empty(t, collectUserErrors(data))
+}
+
+func TestCollectUserErrors_NotAnObject(t *testing.T) {
+	assert.Empty(t, collectUserErrors(nil))
+	assert.Empty(t, collectUserErrors(decodeResponse(t, `[1, 2]`)))
+}
+
+// An `errors` field that is not the Payload shape must be ignored rather than
+// crash the command: not every field called "errors" belongs to a mutation.
+func TestCollectUserErrors_UnexpectedShapes(t *testing.T) {
+	assert.Empty(t, collectUserErrors(decodeResponse(t, `{"thing": {"errors": "not a list"}}`)))
+	assert.Empty(t, collectUserErrors(decodeResponse(t, `{"thing": {"errors": [{"noMessage": 1}]}}`)))
+	assert.Empty(t, collectUserErrors(decodeResponse(t, `{"thing": {"errors": ["plain string"]}}`)))
+}

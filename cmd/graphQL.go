@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"yontrack/client"
 	config "yontrack/config"
@@ -87,9 +88,67 @@ variables object as JSON:
 
 		fmt.Println(string(res))
 
+		failOnUserErrors, err := cmd.Flags().GetBool("fail-on-user-errors")
+		if err != nil {
+			return err
+		}
+		if failOnUserErrors {
+			// Printed above first: the payload is worth seeing even, and
+			// especially, when the mutation was refused.
+			if userErrors := collectUserErrors(data); len(userErrors) > 0 {
+				return errors.New(strings.Join(userErrors, "\n"))
+			}
+		}
+
 		// OK
 		return nil
 	},
+}
+
+// collectUserErrors gathers the messages of every user error carried by a
+// mutation payload in the response.
+//
+// GraphQLCall only fails on transport-level errors. Yontrack reports a refused
+// mutation inside the payload instead, as `errors { message }` on a type
+// implementing Payload, which arrives as ordinary data - so without this a
+// mutation that was refused looks exactly like one that succeeded.
+//
+// Only the top level of `data` is walked, which is where mutation payloads sit.
+func collectUserErrors(data interface{}) []string {
+	root, ok := data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Sorted so the output does not depend on Go's map iteration order.
+	fields := make([]string, 0, len(root))
+	for field := range root {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	var messages []string
+	for _, field := range fields {
+		payload, ok := root[field].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		list, ok := payload["errors"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, entry := range list {
+			item, ok := entry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if message, ok := item["message"].(string); ok {
+				messages = append(messages, fmt.Sprintf("%s: %s", field, message))
+			}
+		}
+	}
+
+	return messages
 }
 
 // buildVariables assembles the GraphQL variables from --vars-json and --var.
@@ -162,6 +221,7 @@ func init() {
 	graphQLCmd.Flags().StringP("query", "q", "", "GraphQL query")
 	graphQLCmd.Flags().StringSliceP("var", "v", []string{}, "GraphQL variable, in the form name=value. Always sent as a string; use --vars-json for any other type.")
 	graphQLCmd.Flags().String("vars-json", "", "GraphQL variables as a JSON object, for variables which are not strings")
+	graphQLCmd.Flags().Bool("fail-on-user-errors", false, "Fail when a mutation payload in the response carries errors. Off by default, so that existing scripts keep their exit codes.")
 
 	graphQLCmd.MarkFlagRequired("query")
 }
