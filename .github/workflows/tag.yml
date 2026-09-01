@@ -55,7 +55,8 @@ jobs:
             --from-promotion RELEASE \
             --to $YONTRACK_BUILD_ID \
             --format markdown \
-            --grouping "Features=feature|Enhancements=enhancement|Bugs=bug" > .yontrack.log.md
+            --grouping "Features=feature|Enhancements=enhancement|Bugs=bug" \
+            --alt-group "Other" > .yontrack.log.md
 
       - name: Release
         uses: softprops/action-gh-release@v2.4.1

@@ -19,3 +19,6 @@ go test -v ./...
 
 ## Adding a command
 
+# Releasing
+
+See [RELEASING.md](RELEASING.md).

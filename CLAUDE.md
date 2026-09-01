@@ -103,6 +103,20 @@ go build -o yontrack .  # build the binary
 ./yontrack <command> --help
 ```
 
+## Releasing
+
+Releases are cut by pushing a `MAJOR.MINOR.PATCH` tag; `.github/workflows/tag.yml`
+does the rest, including generating the changelog from Yontrack. Do not write a
+changelog by hand.
+
+The version is chosen from the labels of the issues since the last tag: a
+`feature` or `enhancement` makes it a minor, `bug` alone makes it a patch. A new
+command or a new flag is additive and still a minor.
+
+**Read [RELEASING.md](RELEASING.md) before cutting one** - it carries the label
+check that keeps issues out of the changelog's `Other` group, and how to preview
+the changelog before committing to a tag.
+
 ## Key conventions
 
 - No branches in `linkBuild`-style mutations — builds are identified project-wide
