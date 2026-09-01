@@ -12,6 +12,7 @@ import (
 )
 
 const releasePropertyType = "net.nemerosa.ontrack.extension.general.ReleasePropertyType"
+const gitCommitPropertyType = "net.nemerosa.ontrack.extension.git.property.GitCommitPropertyType"
 
 var buildLinkCmd = &cobra.Command{
 	Use:   "link",

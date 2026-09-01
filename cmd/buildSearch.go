@@ -311,13 +311,54 @@ func fillFormWithProperty(cmd *cobra.Command, form *map[string]interface{}, prop
 	if err != nil {
 		return err
 	}
+	property, err := cmd.Flags().GetString("with-property")
+	if err != nil {
+		return err
+	}
+	propertyValue, err := cmd.Flags().GetString("with-property-value")
+	if err != nil {
+		return err
+	}
 
-	if commit != "" {
-		(*form)[propertyTypeField] = "net.nemerosa.ontrack.extension.git.property.GitCommitPropertyType"
-		(*form)[propertyValueField] = commit
+	propertyType, value, err := propertyCriteria(commit, property, propertyValue)
+	if err != nil {
+		return err
+	}
+
+	if propertyType != "" {
+		(*form)[propertyTypeField] = propertyType
+		// A property type on its own matches any build carrying it, whatever its
+		// value, so an empty value is left out rather than sent as "".
+		if value != "" {
+			(*form)[propertyValueField] = value
+		}
 	}
 
 	return nil
+}
+
+// propertyCriteria resolves which property to filter on, and on which value.
+//
+// The generic --with-property/--with-property-value pair takes any property
+// type. --commit stays as the shorthand it has always been, and is simply a
+// preset over the same mechanism.
+//
+// Returns empty strings when no property criterion was asked for.
+func propertyCriteria(commit, property, propertyValue string) (string, string, error) {
+	if commit != "" && property != "" {
+		return "", "", errors.New("--commit and --with-property are mutually exclusive")
+	}
+	if property == "" && propertyValue != "" {
+		return "", "", errors.New("--with-property-value requires --with-property")
+	}
+
+	if property != "" {
+		return property, propertyValue, nil
+	}
+	if commit != "" {
+		return gitCommitPropertyType, commit, nil
+	}
+	return "", "", nil
 }
 
 func fillFormWithWithPromotion(cmd *cobra.Command, form *map[string]interface{}, fieldName string) error {
@@ -375,7 +416,9 @@ func init() {
 	buildSearchCmd.Flags().Bool("name-exact", true, "If present together with the `name` flag, requires an exact match.")
 
 	// Property criteria
-	buildSearchCmd.Flags().String("commit", "", "Commit for the build")
+	buildSearchCmd.Flags().String("commit", "", "Commit for the build. Shorthand for --with-property "+gitCommitPropertyType+" --with-property-value <commit>.")
+	buildSearchCmd.Flags().String("with-property", "", "Builds must carry this property, given as its fully qualified type name")
+	buildSearchCmd.Flags().String("with-property-value", "", "Builds must carry --with-property with this value. Without it, any value matches.")
 
 	// Display options
 	buildSearchCmd.Flags().StringP("output", "o", "", "How to output the search results (env, json). Incompatible with the `display` options.")
