@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"yontrack/client"
@@ -97,6 +98,9 @@ func projectSearch(cmd *cobra.Command, project string) error {
 
 	// Search form
 	form := make(map[string]interface{})
+	if err := rejectDisplayNameWithoutBranch(cmd); err != nil {
+		return err
+	}
 	if err := fillFormWithProperty(cmd, &form, "property", "propertyValue"); err != nil {
 		return err
 	}
@@ -181,6 +185,10 @@ func branchSearch(cmd *cobra.Command, project string, branch string) error {
 	}
 
 	if err := fillFormWithWithPromotion(cmd, &form, "withPromotionLevel"); err != nil {
+		return err
+	}
+
+	if err := fillFormWithDisplayName(cmd, &form, "withDisplayName"); err != nil {
 		return err
 	}
 
@@ -316,6 +324,30 @@ func fillFormWithWithPromotion(cmd *cobra.Command, form *map[string]interface{},
 	return fillForm(cmd, form, "with-promotion", fieldName)
 }
 
+// fillFormWithDisplayName adds the display-name criterion to a StandardBuildFilter.
+//
+// A build's display name is its release property when it has one, and its own
+// name otherwise, so this is what matches the version a human would quote.
+func fillFormWithDisplayName(cmd *cobra.Command, form *map[string]interface{}, fieldName string) error {
+	return fillForm(cmd, form, "with-display-name", fieldName)
+}
+
+// rejectDisplayNameWithoutBranch fails a project-wide search that asked for a
+// display name. Only StandardBuildFilter carries `withDisplayName`;
+// BuildSearchForm, used when no branch is given, has no equivalent - so the
+// criterion would otherwise be dropped and the search would quietly return the
+// wrong builds.
+func rejectDisplayNameWithoutBranch(cmd *cobra.Command) error {
+	displayName, err := cmd.Flags().GetString("with-display-name")
+	if err != nil {
+		return err
+	}
+	if displayName != "" {
+		return errors.New("--with-display-name requires --branch")
+	}
+	return nil
+}
+
 func fillForm(cmd *cobra.Command, form *map[string]interface{}, argName string, fieldName string) error {
 	value, err := cmd.Flags().GetString(argName)
 	if err != nil {
@@ -338,6 +370,7 @@ func init() {
 	// Criteria
 	buildSearchCmd.Flags().Int("count", 10, "Number of builds to return")
 	buildSearchCmd.Flags().String("with-promotion", "", "Builds must have this promotion")
+	buildSearchCmd.Flags().String("with-display-name", "", "Builds must have this display name (their release property, or their name when they have none). Requires --branch.")
 	buildSearchCmd.Flags().String("name", "", "Builds must have this name or match this regular expression")
 	buildSearchCmd.Flags().Bool("name-exact", true, "If present together with the `name` flag, requires an exact match.")
 
