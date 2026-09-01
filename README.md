@@ -333,6 +333,57 @@ The same way, you can associate a Git commit property to the build with the `--c
 yontrack build setup --project <project> --branch <branch> --build <build> --commit <commit>
 ```
 
+## Searching for builds
+
+`build search` finds builds in a project and prints them, one per line:
+
+```bash
+yontrack build search --project my-project --branch main --count 1
+```
+
+Restrict the search using any combination of criteria. To get the last build to have been promoted:
+
+```bash
+yontrack build search --project my-project --branch main --with-promotion BRONZE --count 1
+```
+
+To find a build by its display name - its release label when it has one, and its own name otherwise:
+
+```bash
+yontrack build search --project my-project --branch main --with-display-name 1.2.3
+```
+
+The display name is matched case insensitively and *partially*, so `1.2` would also match `1.2.3`. Anchor the pattern with `^` and `$` for an exact match, remembering that dots are wildcards:
+
+```bash
+yontrack build search --project my-project --branch main --with-display-name '^1\.2\.3$'
+```
+
+`--with-display-name` requires `--branch`.
+
+To find builds carrying a given property, named by its type:
+
+```bash
+yontrack build search --project my-project --branch main \
+    --with-property net.nemerosa.ontrack.extension.general.ReleasePropertyType \
+    --with-property-value 1.2.3
+```
+
+Without `--with-property-value`, any build carrying the property matches, whatever its value. Searching on a Git commit has its own shorthand:
+
+```bash
+yontrack build search --project my-project --branch main --commit c1f6c19
+```
+
+By default only build names are printed. `--display-id` prints their IDs instead, and with `--count 1` the whole build can be exported:
+
+```bash
+yontrack build search --project my-project --branch main --count 1 --output json
+yontrack build search --project my-project --branch main --count 1 --output env
+```
+
+Use `--accept-not-found` (or `-n`) to get an empty result rather than a failure when nothing matches.
+
 ## Build links
 
 You can link a source build to a target build to express dependencies between projects:
@@ -612,6 +663,77 @@ yontrack promotion subscribe \
   --template 'Build ${build} has been promoted to ${promotionLevel}. Well done :)'
 ```
 
+# Deployments
+
+When [environments and slots](https://docs.yontrack.com/yontrack/ref/latest/content/integrations/environments/environments.html) are configured, a build can be deployed into an environment from the command line.
+
+## Getting a slot
+
+A slot is where a project is deployed into an environment. To get the one for a project:
+
+```bash
+yontrack slot get --project my-project --environment production
+```
+
+By default this prints the slot ID. The slot also knows which build it last deployed, which is what tells you whether a deployment is needed at all:
+
+```bash
+yontrack slot get --project my-project --environment production --output json
+```
+
+```json
+{
+  "id": "b6b8a2c1-...",
+  "lastDeployedPipeline": {
+    "id": "2957ff78-...",
+    "number": 5,
+    "build": {
+      "id": "11409",
+      "name": "20260901055547-46",
+      "displayName": "1.2.3"
+    }
+  }
+}
+```
+
+`--output env` prints the same information as shell exports, for use in a CI script:
+
+```bash
+eval "$(yontrack slot get --project my-project --environment production --output env)"
+echo "$YONTRACK_SLOT_ID $YONTRACK_SLOT_DEPLOYED_BUILD_NAME"
+```
+
+A slot which has never completed a deployment has no last deployed build, and those values are empty.
+
+## Starting a deployment
+
+To deploy a build into a slot, start a pipeline for it. The build is identified by name:
+
+```bash
+yontrack slot pipeline start --project my-project --environment production --build 42
+```
+
+or by version - its release label:
+
+```bash
+yontrack slot pipeline start --project my-project --environment production --version 1.2.3
+```
+
+The command prints the ID of the pipeline it started. Starting a pipeline is only the beginning of a deployment: the slot's own workflows carry it the rest of the way, so keep this ID to follow what happens next.
+
+```bash
+yontrack slot pipeline start --project my-project --environment production --build 42 --output json
+```
+
+```json
+{
+  "id": "2957ff78-...",
+  "number": 5
+}
+```
+
+The command fails if the deployment is refused - because the build does not meet the slot's admission rules, for example - so a CI job does not have to inspect the output to know whether it worked.
+
 # Misc
 
 ## Direct GraphQL calls
@@ -625,6 +747,25 @@ yontrack graphql \
     --query 'query ProjectList($name: String!) { projects(name: $name) { id name branches { name } } }' \
     --var name=yontrack
 ```
+
+`--var` always sends a string. For a variable of any other type - a number, a boolean, a nested input object - pass the whole variables object as JSON instead:
+
+```bash
+yontrack graphql \
+    --query 'mutation Start($input: StartSlotPipelineInput!) { startSlotPipeline(input: $input) { errors { message } } }' \
+    --vars-json '{"input": {"slotId": "b6b8a2c1-...", "buildId": 11409}}'
+```
+
+Both can be used together; `--var` is applied last, which is handy for overriding a single string in an otherwise fixed object.
+
+Ontrack reports a refused mutation inside the response, as an `errors` list on the payload, rather than as an HTTP or GraphQL error. By default `graphql` prints that response and succeeds, leaving the check to the caller. Use `--fail-on-user-errors` to have the command fail instead:
+
+```bash
+yontrack graphql --fail-on-user-errors \
+    --query 'mutation { ... }'
+```
+
+The response is still printed before the command fails.
 
 ## General options
 
