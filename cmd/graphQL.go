@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"yontrack/client"
 	config "yontrack/config"
 
@@ -41,6 +42,11 @@ var graphQLCmd = &cobra.Command{
 For example:
 
     yontrack graphql --query 'query ProjectList($name: String!) { projects(name: $name) { id name branches { name } } }' --var name=ontrack
+
+--var always sends a string. For a variable of any other type, pass the whole
+variables object as JSON:
+
+    yontrack graphql --query 'mutation Start($input: StartSlotPipelineInput!) { startSlotPipeline(input: $input) { errors { message } } }' --vars-json '{"input": {"slotId": "abc", "buildId": 11404}}'
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query, err := cmd.Flags().GetString("query")
@@ -53,13 +59,14 @@ For example:
 			return err
 		}
 
-		var variables = map[string]interface{}{}
-		for _, token := range vars {
-			name, value, err := parseVar(token)
-			if err != nil {
-				return err
-			}
-			variables[name] = value
+		varsJson, err := cmd.Flags().GetString("vars-json")
+		if err != nil {
+			return err
+		}
+
+		variables, err := buildVariables(varsJson, vars)
+		if err != nil {
+			return err
 		}
 
 		cfg, err := config.GetSelectedConfiguration()
@@ -83,6 +90,48 @@ For example:
 		// OK
 		return nil
 	},
+}
+
+// buildVariables assembles the GraphQL variables from --vars-json and --var.
+//
+// --var can only ever express a string, so a query declaring a non-string
+// variable - $buildId: Int! being the common case - cannot be driven by it: the
+// server receives "11404" and rejects it. --vars-json takes the whole variables
+// object as JSON instead, so every GraphQL type is expressible and no guessing
+// about the intended type is needed.
+//
+// Both can be used together; --var entries are applied last and win, which
+// makes it convenient to override a single string in an otherwise fixed object.
+func buildVariables(varsJson string, vars []string) (map[string]interface{}, error) {
+	variables := map[string]interface{}{}
+
+	if varsJson != "" {
+		decoder := json.NewDecoder(strings.NewReader(varsJson))
+		// Keeps numbers exactly as written, rather than routing them through
+		// float64 and risking a loss of precision on large integers.
+		decoder.UseNumber()
+		var parsed interface{}
+		if err := decoder.Decode(&parsed); err != nil {
+			return nil, fmt.Errorf("--vars-json is not valid JSON: %w", err)
+		}
+		object, ok := parsed.(map[string]interface{})
+		if !ok {
+			return nil, errors.New("--vars-json must be a JSON object")
+		}
+		for name, value := range object {
+			variables[name] = value
+		}
+	}
+
+	for _, token := range vars {
+		name, value, err := parseVar(token)
+		if err != nil {
+			return nil, err
+		}
+		variables[name] = value
+	}
+
+	return variables, nil
 }
 
 func parseVar(token string) (string, string, error) {
@@ -111,7 +160,8 @@ func init() {
 	// is called directly, e.g.:
 	// graphQLCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	graphQLCmd.Flags().StringP("query", "q", "", "GraphQL query")
-	graphQLCmd.Flags().StringSliceP("var", "v", []string{}, "GraphQL variable, in the form name=value")
+	graphQLCmd.Flags().StringSliceP("var", "v", []string{}, "GraphQL variable, in the form name=value. Always sent as a string; use --vars-json for any other type.")
+	graphQLCmd.Flags().String("vars-json", "", "GraphQL variables as a JSON object, for variables which are not strings")
 
 	graphQLCmd.MarkFlagRequired("query")
 }
