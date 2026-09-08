@@ -31,11 +31,14 @@ jobs:
       # added without being linted. No `-s` flag: shellcheck reads each file's
       # shebang, and this repo has both bash and POSIX sh scripts — forcing a
       # dialect fails .github/tag.sh, which is bash despite its .sh extension.
+      # -x so it follows the `.` into test_lib.sh rather than reporting SC1091.
       - name: Shellcheck
-        run: shellcheck $(git ls-files '*.sh' '*.bash')
+        run: shellcheck -x $(git ls-files '*.sh' '*.bash')
 
-      - name: Build
-        run: ./go-executable-build.bash ${VERSION}
+      # build_test.sh runs the build itself and then checks what it produced,
+      # so this is the build step as well as the check on it.
+      - name: Build and check the artifacts
+        run: ./build_test.sh ${VERSION}
 
       # Runs under the runner's /bin/sh, which is dash on Ubuntu, so this is
       # also the check that install.sh has not picked up any bashisms.

@@ -13,36 +13,8 @@ set -eu
 root=$(cd "$(dirname "$0")" && pwd)
 installer="$root/install.sh"
 
-passed=0
-failed=0
-
-ok() {
-    passed=$((passed + 1))
-    printf 'ok   %s\n' "$1"
-}
-
-not_ok() {
-    failed=$((failed + 1))
-    printf 'FAIL %s\n       %s\n' "$1" "$2"
-}
-
-skip() {
-    printf 'skip %s (%s)\n' "$1" "$2"
-}
-
-# root can write to any directory, so the permission tests have nothing to
-# assert when the suite runs as root — as it does in most containers.
-is_root() {
-    [ "$(id -u)" = "0" ]
-}
-
-sha256_of() {
-    if command -v sha256sum > /dev/null 2>&1; then
-        sha256sum "$1" | awk '{print $1}'
-    else
-        shasum -a 256 "$1" | awk '{print $1}'
-    fi
-}
+# shellcheck source=test_lib.sh
+. "$root/test_lib.sh"
 
 # Builds a workspace holding a fake release and a fake `uname`, and echoes it.
 #   $1 the value `uname -s` should report
@@ -405,5 +377,4 @@ rm -rf "$ws"
 
 # --- summary ---------------------------------------------------------------
 
-printf '\n%d passed, %d failed\n' "$passed" "$failed"
-[ "$failed" -eq 0 ]
+test_summary
