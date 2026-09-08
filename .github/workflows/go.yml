@@ -27,6 +27,13 @@ jobs:
       - name: Get version
         run: echo "VERSION=${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
 
+      # `git ls-files` rather than a fixed list, so a new script cannot be
+      # added without being linted. No `-s` flag: shellcheck reads each file's
+      # shebang, and this repo has both bash and POSIX sh scripts — forcing a
+      # dialect fails .github/tag.sh, which is bash despite its .sh extension.
+      - name: Shellcheck
+        run: shellcheck $(git ls-files '*.sh' '*.bash')
+
       - name: Build
         run: ./go-executable-build.bash ${VERSION}
 
