@@ -69,6 +69,7 @@ jobs:
           files: |
             yontrack-*
             ontrack-cli-*
+            checksums.txt
 
       - name: Release validation
         run: |
