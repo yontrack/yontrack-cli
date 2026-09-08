@@ -74,17 +74,11 @@ can directly give the name of the Git branch.
 		// Creates or get the project
 		var data struct {
 			CreateProjectOrGet struct {
-				Project struct {
-					ID int
-				}
 				Errors []struct {
 					Message string
 				}
 			}
 			CreateBranchOrGet struct {
-				Branch struct {
-					ID int
-				}
 				Errors []struct {
 					Message string
 				}

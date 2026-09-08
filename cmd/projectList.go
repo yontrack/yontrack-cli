@@ -89,6 +89,6 @@ type projectListResponse struct {
 }
 
 type project struct {
-	ID   int
+	ID   string
 	Name string
 }
