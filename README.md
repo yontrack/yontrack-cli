@@ -1,11 +1,13 @@
-Ontrack CLI
-===========
+Yontrack CLI
+============
 
 [![Build](https://github.com/yontrack/yontrack-cli/actions/workflows/go.yml/badge.svg)](https://github.com/yontrack/yontrack-cli/actions/workflows/go.yml)
 
-[Ontrack](https://github.com/nemerosa/ontrack) is an application which store all events which happen in your CI/CD environment: branches, builds, validations, promotions, labels, commits, etc. It allows your delivery chains to reach new levels by driving your pipelines using real-time data.
+[Yontrack](https://github.com/nemerosa/ontrack) is an application which store all events which happen in your CI/CD environment: branches, builds, validations, promotions, labels, commits, etc. It allows your delivery chains to reach new levels by driving your pipelines using real-time data.
 
-The Ontrack CLI is a Command Line Interface tool, available on many platforms, which allows you to feed information into Ontrack from any shell platform.
+The Yontrack CLI is a Command Line Interface tool, available on many platforms, which allows you to feed information into Yontrack from any shell platform.
+
+> Yontrack was previously called Ontrack. The GitHub organisation, the companion repositories and the GraphQL schema file still carry the old name; links and commands below use it deliberately and are not stale.
 
 > The Ontrack CLI works only with the version 4 of [Ontrack](https://github.com/nemerosa/ontrack).
 
@@ -60,7 +62,7 @@ yontrack config delete <name>
 
 # Usage
 
-After the configuration has been set, injection of data into Ontrack from a CI pipeline can be typically done this way.
+After the configuration has been set, injection of data into Yontrack from a CI pipeline can be typically done this way.
 
 ## CI setup
 
@@ -223,7 +225,7 @@ source .yontrack
 
 ## Branch setup
 
-We make sure the branch managed by the pipeline is registered into Ontrack:
+We make sure the branch managed by the pipeline is registered into Yontrack:
 
 ```bash
 # Setup of the branch
@@ -459,7 +461,7 @@ Note: `--qualifier` requires `--to-project` to be specified.
 
 ## Git integration
 
-Ontrack can leverage SCM information stored in its model, in order to compute change logs or to allow searches based on commits.
+Yontrack can leverage SCM information stored in its model, in order to compute change logs or to allow searches based on commits.
 
 For example, to associate a project with a GitHub repository:
 
@@ -472,7 +474,7 @@ yontrack project set-property --project <project> github \
     --issue-service self
 ```
 
-This command associates the project with the `yontrack/yontrack` repository, using the credentials defined by the `github.com` GitHub configuration stored in Ontrack. Additionally, Ontrack will index the content of this repository every `30` minutes and the GitHub issues will be used to track issues.
+This command associates the project with the `yontrack/yontrack` repository, using the credentials defined by the `github.com` GitHub configuration stored in Yontrack. Additionally, Yontrack will index the content of this repository every `30` minutes and the GitHub issues will be used to track issues.
 
 Whenever a branch is created, you associate it with the corresponding Git branch this way:
 
@@ -500,13 +502,13 @@ yontrack build setup --project <project> --branch <branch> --build <build> --com
 
 # Validation
 
-One of the most important point of Ontrack is to record _validations_:
+One of the most important point of Yontrack is to record _validations_:
 
 ```bash
 yontrack validate --project <project> --branch <branch> --build <build> --validation <validation> --status <status>
 ```
 
-where `<status>` is an Ontrack validation run status like `PASSED`, `WARNING` or `FAILED`.
+where `<status>` is an Yontrack validation run status like `PASSED`, `WARNING` or `FAILED`.
 
 ## Data validation
 
@@ -583,7 +585,7 @@ yontrack validate --project <project> --branch <branch> --build <build> --valida
 
 # Auto-versioning
 
-The Ontrack CLI can be used to set up the auto-versioning configuration for a branch.
+The Yontrack CLI can be used to set up the auto-versioning configuration for a branch.
 
 Given the `auto-versioning.yaml` file containing the configuration, the call looks like:
 
@@ -607,7 +609,7 @@ dependencies:
       dockerCommand: ./gradlew clean
 ```
 
-> The format of this file is fully described in the Ontrack documentation at
+> The format of this file is fully described in the Yontrack documentation at
 > https://docs.yontrack.com/yontrack/ref/latest/content/integrations/auto-versioning/auto-versioning.html
 
 In a parent repository, you can use the auto-versioning check to automatically create the dependency links.
@@ -738,7 +740,7 @@ The command fails if the deployment is refused - because the build does not meet
 
 ## Direct GraphQL calls
 
-The Ontrack CLI uses the GraphQL API of Ontrack for its communication. The `graphql` command allows to run raw GraphQL queries.
+The Yontrack CLI uses the GraphQL API of Yontrack for its communication. The `graphql` command allows to run raw GraphQL queries.
 
 For example:
 
@@ -758,7 +760,7 @@ yontrack graphql \
 
 Both can be used together; `--var` is applied last, which is handy for overriding a single string in an otherwise fixed object.
 
-Ontrack reports a refused mutation inside the response, as an `errors` list on the payload, rather than as an HTTP or GraphQL error. By default `graphql` prints that response and succeeds, leaving the check to the caller. Use `--fail-on-user-errors` to have the command fail instead:
+Yontrack reports a refused mutation inside the response, as an `errors` list on the payload, rather than as an HTTP or GraphQL error. By default `graphql` prints that response and succeeds, leaving the check to the caller. Use `--fail-on-user-errors` to have the command fail instead:
 
 ```bash
 yontrack graphql --fail-on-user-errors \
@@ -773,11 +775,11 @@ The `--graphqh-log` flag is available for all commands, to enable some tracing o
 
 # Integrations
 
-While the Ontrack CLI can be used directly, there are direct integrations in some environments.
+While the Yontrack CLI can be used directly, there are direct integrations in some environments.
 
 ## Jenkins
 
-The [`ontrack-jenkins-cli-pipeline`](https://github.com/nemerosa/ontrack-jenkins-cli-pipeline/) Jenkins pipeline library allows an easy integration between your `Jenkinsfile` pipelines and Ontrack.
+The [`ontrack-jenkins-cli-pipeline`](https://github.com/nemerosa/ontrack-jenkins-cli-pipeline/) Jenkins pipeline library allows an easy integration between your `Jenkinsfile` pipelines and Yontrack.
 
 ## GitHub actions
 

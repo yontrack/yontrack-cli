@@ -1,8 +1,8 @@
-# Ontrack CLI — Claude guidance
+# Yontrack CLI — Claude guidance
 
 ## Project overview
 
-This is `yontrack`, a CLI tool written in Go for feeding data into [Ontrack](https://github.com/nemerosa/ontrack) (a CI/CD traceability platform). It communicates exclusively via Ontrack's GraphQL API.
+This is `yontrack`, a CLI tool written in Go for feeding data into [Yontrack](https://github.com/nemerosa/ontrack) (a CI/CD traceability platform, formerly called Ontrack — the GitHub organisation still carries the old name). It communicates exclusively via Yontrack's GraphQL API.
 
 ## Tech stack
 
