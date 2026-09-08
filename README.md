@@ -1,7 +1,7 @@
 Ontrack CLI
 ===========
 
-[![Build](https://github.com/nemerosa/yontrack/actions/workflows/go.yml/badge.svg)](https://github.com/nemerosa/yontrack/actions/workflows/go.yml)
+[![Build](https://github.com/yontrack/yontrack-cli/actions/workflows/go.yml/badge.svg)](https://github.com/yontrack/yontrack-cli/actions/workflows/go.yml)
 
 [Ontrack](https://github.com/nemerosa/ontrack) is an application which store all events which happen in your CI/CD environment: branches, builds, validations, promotions, labels, commits, etc. It allows your delivery chains to reach new levels by driving your pipelines using real-time data.
 
@@ -11,7 +11,7 @@ The Ontrack CLI is a Command Line Interface tool, available on many platforms, w
 
 # Installation
 
-Download the latest version for your platform from the [releases](https://github.com/nemerosa/yontrack/releases) page.
+Download the latest version for your platform from the [releases](https://github.com/yontrack/yontrack-cli/releases) page.
 
 No further installation step is needed; the CLI is coded in Golang and does not need any dependency.
 
@@ -467,12 +467,12 @@ For example, to associate a project with a GitHub repository:
 # GitHub setup of the project
 yontrack project set-property --project <project> github \
     --configuration github.com \
-    --repository nemerosa/yontrack \
+    --repository yontrack/yontrack \
     --indexation 30 \
     --issue-service self
 ```
 
-This command associates the project with the `nemerosa/yontrack` repository, using the credentials defined by the `github.com` GitHub configuration stored in Ontrack. Additionally, Ontrack will index the content of this repository every `30` minutes and the GitHub issues will be used to track issues.
+This command associates the project with the `yontrack/yontrack` repository, using the credentials defined by the `github.com` GitHub configuration stored in Ontrack. Additionally, Ontrack will index the content of this repository every `30` minutes and the GitHub issues will be used to track issues.
 
 Whenever a branch is created, you associate it with the corresponding Git branch this way:
 

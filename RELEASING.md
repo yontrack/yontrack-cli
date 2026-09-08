@@ -102,7 +102,7 @@ For the record, so the manual steps above are not reinvented:
    attached
 5. Validates `GITHUB.RELEASE` on the build and sets its `release` property
 
-Steps 2 to 5 need `vars.ONTRACK_URL` and `secrets.ONTRACK_TOKEN`.
+Steps 2 to 5 need `vars.YONTRACK_URL` and `secrets.YONTRACK_TOKEN`.
 
 ## After the release
 
