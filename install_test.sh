@@ -62,6 +62,7 @@ EOF
 
     printf '#!/bin/sh\necho fake yontrack\n' > "$ws/release/download/1.2.3/yontrack-linux-amd64"
     printf '#!/bin/sh\necho wrong platform\n' > "$ws/release/download/1.2.3/yontrack-darwin-arm64"
+    printf '#!/bin/sh\necho linux arm64 build\n' > "$ws/release/download/1.2.3/yontrack-linux-arm64"
 
     ( cd "$ws/release/download/1.2.3" \
         && for f in yontrack-*; do printf '%s  %s\n' "$(sha256_of "$f")" "$f"; done \
@@ -134,6 +135,18 @@ if [ "$status" -ne 0 ]; then
     not_ok "$t" "exited $status: $out"
 elif ! grep -q 'wrong platform' "$ws/target/yontrack"; then
     not_ok "$t" "did not pick yontrack-darwin-arm64"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="picks the linux/arm64 build on an aarch64 Linux host"
+ws=$(workspace Linux aarch64)
+run_installer "$ws"
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif ! grep -q 'linux arm64 build' "$ws/target/yontrack"; then
+    not_ok "$t" "did not pick yontrack-linux-arm64"
 else
     ok "$t"
 fi
