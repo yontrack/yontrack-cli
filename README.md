@@ -13,9 +13,41 @@ The Yontrack CLI is a Command Line Interface tool, available on many platforms, 
 
 # Installation
 
-Download the latest version for your platform from the [releases](https://github.com/yontrack/yontrack-cli/releases) page.
+On macOS and Linux:
 
-No further installation step is needed; the CLI is coded in Golang and does not need any dependency.
+```bash
+curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | sh
+```
+
+This works out your platform, downloads the matching binary, checks it against the checksums published with the release, and installs it as `yontrack`. Run it again to upgrade. The CLI is a single Go binary with no dependencies.
+
+Two environment variables control it:
+
+| Variable | Default | |
+|---|---|---|
+| `INSTALL_DIR` | `/usr/local/bin` | Where to install. The script never asks for a password: if it cannot write there, it installs nothing and prints what to run instead. |
+| `VERSION` | the latest release | Install a specific release, for example `5.4.0`. |
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | INSTALL_DIR=$HOME/.local/bin sh
+```
+
+## Windows
+
+Download `yontrack-windows-amd64.exe` from the [releases](https://github.com/yontrack/yontrack-cli/releases) page and rename it to `yontrack.exe`.
+
+## Downloading the binary yourself
+
+Installing by hand stays supported — for air-gapped machines, an internal mirror, or a pinned CI image. Take the asset for your platform from the [releases](https://github.com/yontrack/yontrack-cli/releases) page, then do the two things the download does not do for you:
+
+```bash
+chmod +x ./yontrack
+xattr -d com.apple.quarantine ./yontrack   # macOS only
+```
+
+The second command needs explaining. A browser tags whatever it downloads with a `com.apple.quarantine` attribute, and macOS refuses to run a quarantined binary that Apple has not notarized — the dialog says it "could not verify" the binary "is free of malware". `curl` never sets that attribute, which is why the installer above does not meet the dialog at all. Removing it by hand leaves the file in the same position as one `curl` fetched. That is a real Gatekeeper check you are clearing, so do it only for a binary you fetched from the releases page above. The alternative, since macOS Sequoia removed the Control-click override, is System Settings → Privacy & Security, once per binary, with an admin password.
+
+Run `yontrack` from a terminal either way. Double-clicking it in Finder triggers a separate Gatekeeper check that fails whatever you do.
 
 # Setup
 
