@@ -7,39 +7,29 @@ then
 fi
 echo version=$version
 
-mode=$2
-
-package_names=("yontrack")
-
-# Add ontrack-cli for backward compatibility if mode is "release"
-if [ "$mode" = "release" ]; then
-    package_names+=("ontrack-cli")
-fi
+package_name="yontrack"
 
 artifacts=()
 
 platforms=("windows/amd64" "darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" "linux/386")
 
-for package_name in "${package_names[@]}"
+for platform in "${platforms[@]}"
 do
-    for platform in "${platforms[@]}"
-    do
-        platform_split=(${platform//\// })
-        GOOS=${platform_split[0]}
-        GOARCH=${platform_split[1]}
-        output_name=$package_name'-'$GOOS'-'$GOARCH
-        if [ $GOOS = "windows" ]; then
-            output_name+='.exe'
-        fi
+    platform_split=(${platform//\// })
+    GOOS=${platform_split[0]}
+    GOARCH=${platform_split[1]}
+    output_name=$package_name'-'$GOOS'-'$GOARCH
+    if [ $GOOS = "windows" ]; then
+        output_name+='.exe'
+    fi
 
-        env GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-X yontrack/config.Version=$version" -o $output_name $package
-        if [ $? -ne 0 ]; then
-            echo 'An error has occurred! Aborting the script execution...'
-            exit 1
-        fi
+    env GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-X yontrack/config.Version=$version" -o $output_name $package
+    if [ $? -ne 0 ]; then
+        echo 'An error has occurred! Aborting the script execution...'
+        exit 1
+    fi
 
-        artifacts+=("$output_name")
-    done
+    artifacts+=("$output_name")
 done
 
 # Checksums over exactly the artifacts built above, in the format both

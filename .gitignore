@@ -1,6 +1,5 @@
 # Artifacts
 /yontrack*
-/ontrack-cli-*
 /checksums.txt
 /auto-versioning.yaml
 /.yontrack-config.yaml
