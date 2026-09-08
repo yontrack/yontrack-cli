@@ -97,6 +97,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No INSTALL_DIR: the default is what almost everyone gets, and it is
+      # the whole point of the default that this needs no privileges.
+      - name: Install with the default install directory
+        run: ./install.sh
+
+      - name: The default install lands in ~/.local/bin and runs
+        run: |
+          "$HOME/.local/bin/yontrack" version --cli
+
       # A directory the runner owns, so this exercises the path that needs no
       # privileges — the one the installer refuses to escalate for.
       - name: Install

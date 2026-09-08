@@ -6,7 +6,7 @@
 #
 # Environment:
 #
-#   INSTALL_DIR  where to put the binary. Default /usr/local/bin.
+#   INSTALL_DIR  where to put the binary. Default $HOME/.local/bin.
 #   VERSION      release to install, e.g. 5.4.0. Default: the latest release.
 #   BASE_URL     where to fetch releases from. Default: GitHub. For mirrors.
 #
@@ -18,8 +18,8 @@ set -eu
 repo="yontrack/yontrack-cli"
 bin="yontrack"
 
-install_dir=${INSTALL_DIR:-/usr/local/bin}
 base_url=${BASE_URL:-"https://github.com/$repo/releases"}
+script_url="https://raw.githubusercontent.com/$repo/main/install.sh"
 
 tmp=""
 staged=""
@@ -41,6 +41,24 @@ fail() {
     exit 1
 }
 
+# Resolved here rather than with the other settings above, because working out
+# the default can fail and fail() has to exist first.
+#
+# The default is under $HOME: a per-user tool, with per-user config in
+# ~/.yontrack-config.yaml, that installs without privileges. A system location
+# would need a password on any machine where the user is not also the admin —
+# every stock macOS, where /usr/local is root-owned and Homebrew lives in
+# /opt/homebrew.
+if [ -n "${INSTALL_DIR:-}" ]; then
+    install_dir=$INSTALL_DIR
+elif [ -n "${HOME:-}" ]; then
+    install_dir="$HOME/.local/bin"
+else
+    fail 'HOME is not set, so there is no default install directory.
+       Say where to install:
+           INSTALL_DIR=/path/to/bin sh install.sh'
+fi
+
 # Maps `uname -s` onto the GOOS used in the published asset names.
 detect_os() {
     detected=$(uname -s)
@@ -59,6 +77,27 @@ detect_arch() {
         aarch64 | arm64) printf 'arm64' ;;
         i386 | i686)     printf '386' ;;
         *)               fail "unsupported platform: $(uname -s)/$detected. See https://github.com/$repo/releases for what is published" ;;
+    esac
+}
+
+# Names the startup file the PATH line should go in, so the hint below can be
+# pasted rather than adapted. macOS runs login shells in Terminal, which read
+# ~/.bash_profile and never ~/.bashrc; Linux is the other way round. Anything
+# else gets ~/.profile, which every POSIX shell reads.
+# The tilde is printed for the user to read and paste into their own shell,
+# which expands it; nothing here uses it as a path.
+# shellcheck disable=SC2088
+shell_profile() {
+    case "${SHELL:-}" in
+        */zsh)  printf '~/.zshrc' ;;
+        */bash)
+            if [ "$1" = "darwin" ]; then
+                printf '~/.bash_profile'
+            else
+                printf '~/.bashrc'
+            fi
+            ;;
+        *)      printf '~/.profile' ;;
     esac
 }
 
@@ -106,16 +145,21 @@ if [ ! -d "$install_dir" ]; then
     mkdir -p "$install_dir" 2> /dev/null \
         || fail "$install_dir does not exist and could not be created.
        Create it, or install somewhere you own:
-           INSTALL_DIR=\$HOME/.local/bin sh install.sh"
+           curl -fsSL $script_url | INSTALL_DIR=\$HOME/.local/bin sh"
 fi
 
+# Only reachable when INSTALL_DIR points somewhere the user does not own: the
+# default is under their home directory. So the first suggestion is to drop
+# the override, and the second is how to install into a system directory
+# deliberately — downloaded and read first, never piped into sudo.
 if [ ! -w "$install_dir" ]; then
     fail "$install_dir is not writable.
-       Install somewhere you own, which needs no privileges:
-           INSTALL_DIR=\$HOME/.local/bin sh install.sh
+       Install somewhere you own, which needs no privileges — leaving
+       INSTALL_DIR unset installs into \$HOME/.local/bin:
+           curl -fsSL $script_url | sh
        or download this script, read it, and run that with sudo:
-           curl -fsSLo install.sh https://raw.githubusercontent.com/$repo/main/install.sh
-           sudo sh install.sh"
+           curl -fsSLo install.sh $script_url
+           sudo INSTALL_DIR=$install_dir sh install.sh"
 fi
 
 tmp=$(mktemp -d)
@@ -154,5 +198,21 @@ printf 'Installed %s %s to %s\n' "$bin" "$version" "$install_dir/$bin"
 
 case ":$PATH:" in
     *":$install_dir:"*) ;;
-    *) printf 'warning: %s is not on your PATH\n' "$install_dir" ;;
+    *)
+        # Written as $HOME/... when it is under the home directory, so the
+        # line stays right if the profile is shared between machines.
+        path_entry=$install_dir
+        if [ -n "${HOME:-}" ]; then
+            case "$install_dir" in
+                "$HOME"/*) path_entry="\$HOME${install_dir#"$HOME"}" ;;
+            esac
+        fi
+        printf 'warning: %s is not on your PATH.\n' "$install_dir"
+        printf '         Add it, then restart your shell:\n'
+        # $PATH and $HOME are printed for the user's shell to expand later,
+        # not for this one to expand now, so the quotes are deliberate.
+        # shellcheck disable=SC2016
+        printf '             echo '\''export PATH="%s:$PATH"'\'' >> %s\n' \
+            "$path_entry" "$(shell_profile "$os")"
+        ;;
 esac

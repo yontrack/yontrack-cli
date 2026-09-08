@@ -21,7 +21,7 @@ installer="$root/install.sh"
 #   $2 the value `uname -m` should report
 workspace() {
     ws=$(mktemp -d)
-    mkdir -p "$ws/fakebin" "$ws/target" "$ws/release/download/1.2.3"
+    mkdir -p "$ws/fakebin" "$ws/target" "$ws/home" "$ws/release/download/1.2.3"
 
     cat > "$ws/fakebin/uname" <<EOF
 #!/bin/sh
@@ -47,13 +47,19 @@ EOF
 # TEST_PATH replaces the PATH the installer sees, for the case where a tool it
 # depends on is absent. /bin/sh is invoked by absolute path so the installer
 # still starts when TEST_PATH holds nothing useful.
+#
+# HOME points into the workspace so the default install directory lands there
+# rather than in the home directory of whoever is running the suite. Setting
+# TEST_INSTALL_DIR to the empty string leaves INSTALL_DIR unset, which is how
+# the default itself gets tested.
 run_installer() {
     run_ws=$1
     set +e
     out=$(PATH="${TEST_PATH:-$run_ws/fakebin:$PATH}" \
+        HOME="$run_ws/home" \
         BASE_URL="file://$run_ws/release" \
         VERSION="${TEST_VERSION-1.2.3}" \
-        INSTALL_DIR="$run_ws/target" \
+        INSTALL_DIR="${TEST_INSTALL_DIR-$run_ws/target}" \
         /bin/sh "$installer" 2>&1)
     status=$?
     set -e
@@ -338,7 +344,7 @@ elif printf '%s' "$out" | grep -q 'curl.*| *sudo'; then
     not_ok "$t" "told the user to pipe a downloaded script into sudo: $out"
 elif ! printf '%s' "$out" | grep -q 'INSTALL_DIR'; then
     not_ok "$t" "no privilege-free alternative offered: $out"
-elif ! printf '%s' "$out" | grep -q 'sudo sh install.sh'; then
+elif ! printf '%s' "$out" | grep -q 'sudo INSTALL_DIR=.* sh install.sh'; then
     not_ok "$t" "no reviewable sudo route offered: $out"
 else
     ok "$t"
@@ -354,6 +360,94 @@ if [ "$status" -ne 0 ]; then
     not_ok "$t" "exited $status: $out"
 elif [ ! -x "$ws/target/yontrack" ]; then
     not_ok "$t" "did not create the directory and install into it"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+# --- the default install directory -----------------------------------------
+
+t="installs into \$HOME/.local/bin when INSTALL_DIR is unset"
+ws=$(workspace Linux x86_64)
+TEST_INSTALL_DIR=""
+run_installer "$ws"
+unset TEST_INSTALL_DIR
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif [ ! -x "$ws/home/.local/bin/yontrack" ]; then
+    not_ok "$t" "nothing at home/.local/bin/yontrack: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="creates \$HOME/.local/bin when it does not exist yet"
+ws=$(workspace Linux x86_64)
+TEST_INSTALL_DIR=""
+run_installer "$ws"
+unset TEST_INSTALL_DIR
+# workspace() never creates it, so a pass here is the installer having done so.
+if [ -d "$ws/home/.local/bin" ]; then
+    ok "$t"
+else
+    not_ok "$t" "the default directory was not created: $out"
+fi
+rm -rf "$ws"
+
+t="needs no privileges for the default, even as an ordinary user"
+ws=$(workspace Linux x86_64)
+# The home directory is the only writable thing on offer: a default that
+# reached outside it could not install here.
+chmod 555 "$ws/target"
+TEST_INSTALL_DIR=""
+run_installer "$ws"
+unset TEST_INSTALL_DIR
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif ! printf '%s' "$out" | grep -q "$ws/home"; then
+    not_ok "$t" "did not report installing under the home directory: $out"
+else
+    ok "$t"
+fi
+chmod 755 "$ws/target"
+rm -rf "$ws"
+
+# --- the PATH warning ------------------------------------------------------
+
+t="warns when the install directory is not on PATH"
+ws=$(workspace Linux x86_64)
+run_installer "$ws"
+if printf '%s' "$out" | grep -q "warning:.*$ws/target.*not on your PATH"; then
+    ok "$t"
+else
+    not_ok "$t" "no PATH warning naming the directory: $out"
+fi
+rm -rf "$ws"
+
+t="the PATH warning prints a line that can be pasted"
+ws=$(workspace Linux x86_64)
+TEST_INSTALL_DIR=""
+run_installer "$ws"
+unset TEST_INSTALL_DIR
+# Written with $HOME rather than the expanded path, and appended to a startup
+# file that is named — the two things that make it paste-able.
+# shellcheck disable=SC2016  # the literal $HOME is exactly what is asserted
+if ! printf '%s' "$out" | grep -q 'export PATH="\$HOME/.local/bin:\$PATH"'; then
+    not_ok "$t" "no export line using \$HOME: $out"
+elif ! printf '%s' "$out" | grep -qE '>> ~/\.[a-z_]+'; then
+    not_ok "$t" "the export line names no startup file: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="says nothing about PATH when the directory is already on it"
+ws=$(workspace Linux x86_64)
+TEST_PATH="$ws/target:$ws/fakebin:$PATH"
+run_installer "$ws"
+unset TEST_PATH
+if printf '%s' "$out" | grep -q 'not on your PATH'; then
+    not_ok "$t" "warned about a directory that is on PATH: $out"
 else
     ok "$t"
 fi

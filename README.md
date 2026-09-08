@@ -21,16 +21,21 @@ curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.
 
 This works out your platform, downloads the matching binary, checks it against the checksums published with the release, and installs it as `yontrack`. Run it again to upgrade. The CLI is a single Go binary with no dependencies.
 
+It installs into `$HOME/.local/bin`, so it never needs a password. If that directory is not on your `PATH`, the script says so and prints the line to add to your shell's startup file.
+
 Three environment variables control it:
 
 | Variable | Default | |
 |---|---|---|
-| `INSTALL_DIR` | `/usr/local/bin` | Where to install. The script never asks for a password: if it cannot write there, it installs nothing and prints what to run instead. |
+| `INSTALL_DIR` | `$HOME/.local/bin` | Where to install. The script never asks for a password: if it cannot write there, it installs nothing and prints what to run instead. |
 | `VERSION` | the latest release | Install a specific release tag rather than the newest one. |
 | `BASE_URL` | GitHub releases | Fetch from somewhere else, such as an internal mirror. |
 
+To install somewhere else — a system-wide directory, say — set `INSTALL_DIR`. A system directory is not yours to write to, so that one needs `sudo`, and the script will not be piped into it: download it, read it, then run it.
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | INSTALL_DIR=$HOME/.local/bin sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh
+sudo INSTALL_DIR=/usr/local/bin sh install.sh
 ```
 
 ## Windows
