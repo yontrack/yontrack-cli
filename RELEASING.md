@@ -94,7 +94,7 @@ gh run watch <run-id>
 
 For the record, so the manual steps above are not reinvented:
 
-1. Builds every platform binary via `go-executable-build.bash <version> release`
+1. Builds every platform binary via `go-executable-build.bash <version>`, and the `checksums.txt` the installer verifies against
 2. Configures the CLI against the Yontrack instance and finds the build for the
    tagged commit
 3. Exports the changelog since the last `RELEASE`-promoted build

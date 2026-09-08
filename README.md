@@ -21,12 +21,13 @@ curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.
 
 This works out your platform, downloads the matching binary, checks it against the checksums published with the release, and installs it as `yontrack`. Run it again to upgrade. The CLI is a single Go binary with no dependencies.
 
-Two environment variables control it:
+Three environment variables control it:
 
 | Variable | Default | |
 |---|---|---|
 | `INSTALL_DIR` | `/usr/local/bin` | Where to install. The script never asks for a password: if it cannot write there, it installs nothing and prints what to run instead. |
-| `VERSION` | the latest release | Install a specific release, for example `5.4.0`. |
+| `VERSION` | the latest release | Install a specific release tag rather than the newest one. |
+| `BASE_URL` | GitHub releases | Fetch from somewhere else, such as an internal mirror. |
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | INSTALL_DIR=$HOME/.local/bin sh
@@ -38,16 +39,19 @@ Download `yontrack-windows-amd64.exe` from the [releases](https://github.com/yon
 
 ## Downloading the binary yourself
 
-Installing by hand stays supported — for air-gapped machines, an internal mirror, or a pinned CI image. Take the asset for your platform from the [releases](https://github.com/yontrack/yontrack-cli/releases) page, then do the two things the download does not do for you:
+Installing by hand stays supported — for air-gapped machines, an internal mirror, or a pinned CI image. Take the asset for your platform from the [releases](https://github.com/yontrack/yontrack-cli/releases) page, then do what the download does not do for you:
 
 ```bash
+mv ./yontrack-darwin-arm64 ./yontrack        # the asset is named for its platform
 chmod +x ./yontrack
-xattr -d com.apple.quarantine ./yontrack   # macOS only
+xattr -d com.apple.quarantine ./yontrack     # macOS only
 ```
 
-The second command needs explaining. A browser tags whatever it downloads with a `com.apple.quarantine` attribute, and macOS refuses to run a quarantined binary that Apple has not notarized — the dialog says it "could not verify" the binary "is free of malware". `curl` never sets that attribute, which is why the installer above does not meet the dialog at all. Removing it by hand leaves the file in the same position as one `curl` fetched. That is a real Gatekeeper check you are clearing, so do it only for a binary you fetched from the releases page above. The alternative, since macOS Sequoia removed the Control-click override, is System Settings → Privacy & Security, once per binary, with an admin password.
+The last command reports `No such xattr` if the attribute is not there, which is harmless — a file fetched with `curl` never has one.
 
-Run `yontrack` from a terminal either way. Double-clicking it in Finder triggers a separate Gatekeeper check that fails whatever you do.
+The `xattr` command needs explaining. A browser tags whatever it downloads with a `com.apple.quarantine` attribute, and macOS refuses to run a quarantined binary that Apple has not notarized — the dialog says it "could not verify" the binary "is free of malware". `curl` never sets that attribute, which is why the installer above does not meet the dialog at all. Removing it by hand leaves the file in the same position as one `curl` fetched. That is a real Gatekeeper check you are clearing, so do it only for a binary you fetched from the releases page above. The alternative, since macOS Sequoia removed the Control-click override, is System Settings → Privacy & Security, once per binary, with an admin password.
+
+Run `yontrack` from a terminal. Double-clicking a *quarantined* binary in Finder runs a separate Gatekeeper check that fails however well signed it is, so if you skip the `xattr` step that route stays closed.
 
 # Setup
 
@@ -540,7 +544,7 @@ One of the most important point of Yontrack is to record _validations_:
 yontrack validate --project <project> --branch <branch> --build <build> --validation <validation> --status <status>
 ```
 
-where `<status>` is an Yontrack validation run status like `PASSED`, `WARNING` or `FAILED`.
+where `<status>` is a Yontrack validation run status like `PASSED`, `WARNING` or `FAILED`.
 
 ## Data validation
 
