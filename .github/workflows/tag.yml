@@ -24,7 +24,7 @@ jobs:
 
       - name: Build packages
         run: |
-          ./build_test.sh ${VERSION}
+          ./build_test.sh "${VERSION}"
           cp yontrack-linux-amd64 yontrack
 
       - name: Yontrack setup

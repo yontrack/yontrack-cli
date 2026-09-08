@@ -33,12 +33,12 @@ jobs:
       # dialect fails .github/tag.sh, which is bash despite its .sh extension.
       # -x so it follows the `.` into test_lib.sh rather than reporting SC1091.
       - name: Shellcheck
-        run: shellcheck -x $(git ls-files '*.sh' '*.bash')
+        run: git ls-files '*.sh' '*.bash' | xargs shellcheck -x
 
       # build_test.sh runs the build itself and then checks what it produced,
       # so this is the build step as well as the check on it.
       - name: Build and check the artifacts
-        run: ./build_test.sh ${VERSION}
+        run: ./build_test.sh "${VERSION}"
 
       # Runs under the runner's /bin/sh, which is dash on Ubuntu, so this is
       # also the check that install.sh has not picked up any bashisms.
@@ -78,3 +78,46 @@ jobs:
           ./yontrack-linux-amd64 validate \
             --validation TESTS \
             --status ${{ steps.test.outcome == 'success' && 'PASSED' || 'FAILED' }}
+
+  # Installs the latest *published* release, not this commit. install.sh is the
+  # only thing in this repository that runs on other people's machines, and the
+  # published release is what it will meet there.
+  #
+  # This cannot pass until a release exists carrying checksums.txt, which the
+  # installer requires: 5.4.0 is the first.
+  installer:
+    name: Installer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is arm64, ubuntu-24.04-arm covers linux/arm64, so
+        # between them every published Unix binary but linux/386 gets run.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # A directory the runner owns, so this exercises the path that needs no
+      # privileges — the one the installer refuses to escalate for.
+      - name: Install
+        run: INSTALL_DIR="$HOME/bin" ./install.sh
+
+      - name: The installed binary runs and reports a release version
+        run: |
+          "$HOME/bin/yontrack" version --cli
+          "$HOME/bin/yontrack" version --cli | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'
+
+      # The reason the installer exists. A curl download is never quarantined,
+      # so if this attribute ever appears, the macOS install is broken again.
+      - name: The installed binary is not quarantined
+        if: runner.os == 'macOS'
+        run: |
+          # Asserted first: `xattr` on a missing file reports no attribute,
+          # so without this the check passes when nothing was installed.
+          test -x "$HOME/bin/yontrack"
+          if xattr "$HOME/bin/yontrack" | grep -q com.apple.quarantine; then
+            echo "the installed binary carries com.apple.quarantine"
+            xattr -l "$HOME/bin/yontrack"
+            exit 1
+          fi
+          echo "no quarantine attribute, as expected"
