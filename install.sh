@@ -25,11 +25,16 @@ tmp=""
 staged=""
 
 cleanup() {
-    [ -n "$tmp" ] && rm -rf "$tmp"
-    [ -n "$staged" ] && rm -f "$staged"
+    [ -n "$tmp" ] && rm -rf "$tmp" && tmp=""
+    [ -n "$staged" ] && rm -f "$staged" && staged=""
     return 0
 }
-trap cleanup EXIT INT TERM
+
+# A handler that just returns lets the script carry on after the signal, with
+# its temporary directory already deleted, so INT and TERM exit explicitly.
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 fail() {
     printf 'error: %s\n' "$1" >&2
@@ -42,18 +47,18 @@ detect_os() {
     case $(printf '%s' "$detected" | tr '[:upper:]' '[:lower:]') in
         linux)  printf 'linux' ;;
         darwin) printf 'darwin' ;;
-        *)      fail "unsupported operating system: $detected. Binaries are published for Linux and macOS; see https://github.com/$repo/releases" ;;
+        *)      fail "unsupported platform: $detected/$(uname -m). Binaries are published for Linux and macOS; see https://github.com/$repo/releases" ;;
     esac
 }
 
 # Maps `uname -m` onto the GOARCH used in the published asset names.
 detect_arch() {
-    detected=$(uname -m)
+    detected=$(uname -m | tr '[:upper:]' '[:lower:]')
     case "$detected" in
         x86_64 | amd64)  printf 'amd64' ;;
         aarch64 | arm64) printf 'arm64' ;;
         i386 | i686)     printf '386' ;;
-        *)               fail "unsupported architecture: $detected. See https://github.com/$repo/releases for what is published" ;;
+        *)               fail "unsupported platform: $(uname -s)/$detected. See https://github.com/$repo/releases for what is published" ;;
     esac
 }
 
@@ -83,14 +88,16 @@ resolve_latest() {
 command -v curl > /dev/null 2>&1 \
     || fail 'curl is required to download the release, but is not installed'
 
-os=$(detect_os)
-arch=$(detect_arch)
+# `|| exit` rather than leaning on `set -e`: fail() runs inside the command
+# substitution, so its exit only ends the subshell.
+os=$(detect_os) || exit 1
+arch=$(detect_arch) || exit 1
 asset="$bin-$os-$arch"
 
 if [ -n "${VERSION:-}" ]; then
     version=$VERSION
 else
-    version=$(resolve_latest)
+    version=$(resolve_latest) || exit 1
 fi
 
 # Checked before downloading anything, so a permission problem costs the user
@@ -104,10 +111,11 @@ fi
 
 if [ ! -w "$install_dir" ]; then
     fail "$install_dir is not writable.
-       Re-run with elevated privileges:
-           curl -fsSL https://raw.githubusercontent.com/$repo/main/install.sh | sudo sh
-       or install somewhere you own:
-           INSTALL_DIR=\$HOME/.local/bin sh install.sh"
+       Install somewhere you own, which needs no privileges:
+           INSTALL_DIR=\$HOME/.local/bin sh install.sh
+       or download this script, read it, and run that with sudo:
+           curl -fsSLo install.sh https://raw.githubusercontent.com/$repo/main/install.sh
+           sudo sh install.sh"
 fi
 
 tmp=$(mktemp -d)
@@ -126,7 +134,7 @@ curl -fsSL "$release_url/checksums.txt" -o "$tmp/checksums.txt" \
 expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$tmp/checksums.txt")
 [ -n "$expected" ] || fail "checksums.txt for $version does not cover $asset, so it cannot be verified"
 
-actual=$(sha256_of "$tmp/$asset")
+actual=$(sha256_of "$tmp/$asset") || exit 1
 if [ "$actual" != "$expected" ]; then
     fail "checksum mismatch for $asset
        expected $expected

@@ -30,6 +30,11 @@ jobs:
       - name: Build
         run: ./go-executable-build.bash ${VERSION}
 
+      # Runs under the runner's /bin/sh, which is dash on Ubuntu, so this is
+      # also the check that install.sh has not picked up any bashisms.
+      - name: Installer tests
+        run: ./install_test.sh
+
       - if: ${{ github.event_name != 'pull_request' }}
         name: Yontrack setup
         run: |

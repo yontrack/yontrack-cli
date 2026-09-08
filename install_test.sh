@@ -21,7 +21,7 @@ ok() {
     printf 'ok   %s\n' "$1"
 }
 
-ko() {
+not_ok() {
     failed=$((failed + 1))
     printf 'FAIL %s\n       %s\n' "$1" "$2"
 }
@@ -75,12 +75,12 @@ EOF
 # depends on is absent. /bin/sh is invoked by absolute path so the installer
 # still starts when TEST_PATH holds nothing useful.
 run_installer() {
-    ws=$1
+    run_ws=$1
     set +e
-    out=$(PATH="${TEST_PATH:-$ws/fakebin:$PATH}" \
-        BASE_URL="file://$ws/release" \
-        VERSION=1.2.3 \
-        INSTALL_DIR="$ws/target" \
+    out=$(PATH="${TEST_PATH:-$run_ws/fakebin:$PATH}" \
+        BASE_URL="file://$run_ws/release" \
+        VERSION="${TEST_VERSION-1.2.3}" \
+        INSTALL_DIR="$run_ws/target" \
         /bin/sh "$installer" 2>&1)
     status=$?
     set -e
@@ -92,11 +92,11 @@ t="installs the binary for the detected platform"
 ws=$(workspace Linux x86_64)
 run_installer "$ws"
 if [ "$status" -ne 0 ]; then
-    ko "$t" "exited $status: $out"
+    not_ok "$t" "exited $status: $out"
 elif [ ! -x "$ws/target/yontrack" ]; then
-    ko "$t" "no executable at target/yontrack"
+    not_ok "$t" "no executable at target/yontrack"
 elif ! grep -q 'fake yontrack' "$ws/target/yontrack"; then
-    ko "$t" "installed the wrong asset"
+    not_ok "$t" "installed the wrong asset"
 else
     ok "$t"
 fi
@@ -111,7 +111,7 @@ mode=$(ls -l "$ws/target/yontrack" | cut -c1-10)
 if [ "$mode" = "-rwxr-xr-x" ]; then
     ok "$t"
 else
-    ko "$t" "mode is $mode, expected -rwxr-xr-x"
+    not_ok "$t" "mode is $mode, expected -rwxr-xr-x"
 fi
 rm -rf "$ws"
 
@@ -121,7 +121,7 @@ run_installer "$ws"
 if printf '%s' "$out" | grep -q '1\.2\.3'; then
     ok "$t"
 else
-    ko "$t" "output never mentions 1.2.3: $out"
+    not_ok "$t" "output never mentions 1.2.3: $out"
 fi
 rm -rf "$ws"
 
@@ -131,9 +131,37 @@ t="normalises aarch64 and Darwin to the published asset name"
 ws=$(workspace Darwin aarch64)
 run_installer "$ws"
 if [ "$status" -ne 0 ]; then
-    ko "$t" "exited $status: $out"
+    not_ok "$t" "exited $status: $out"
 elif ! grep -q 'wrong platform' "$ws/target/yontrack"; then
-    ko "$t" "did not pick yontrack-darwin-arm64"
+    not_ok "$t" "did not pick yontrack-darwin-arm64"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="normalises arm64, the value macOS actually reports"
+ws=$(workspace Darwin arm64)
+run_installer "$ws"
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif ! grep -q 'wrong platform' "$ws/target/yontrack"; then
+    not_ok "$t" "did not pick yontrack-darwin-arm64"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="normalises i686 to the published 386 asset"
+ws=$(workspace Linux i686)
+printf '#!/bin/sh\necho 386 build\n' > "$ws/release/download/1.2.3/yontrack-linux-386"
+( cd "$ws/release/download/1.2.3" \
+    && for f in yontrack-*; do printf '%s  %s\n' "$(sha256_of "$f")" "$f"; done \
+    > checksums.txt )
+run_installer "$ws"
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif ! grep -q '386 build' "$ws/target/yontrack"; then
+    not_ok "$t" "did not pick yontrack-linux-386"
 else
     ok "$t"
 fi
@@ -143,9 +171,9 @@ t="refuses an unsupported operating system by name"
 ws=$(workspace SunOS x86_64)
 run_installer "$ws"
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 on SunOS"
+    not_ok "$t" "exited 0 on SunOS"
 elif ! printf '%s' "$out" | grep -qi 'sunos'; then
-    ko "$t" "error does not name the detected OS: $out"
+    not_ok "$t" "error does not name the detected OS: $out"
 else
     ok "$t"
 fi
@@ -155,9 +183,68 @@ t="refuses an unsupported architecture by name"
 ws=$(workspace Linux mips64)
 run_installer "$ws"
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 on mips64"
+    not_ok "$t" "exited 0 on mips64"
 elif ! printf '%s' "$out" | grep -qi 'mips64'; then
-    ko "$t" "error does not name the detected architecture: $out"
+    not_ok "$t" "error does not name the detected architecture: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+# --- resolving the latest release ------------------------------------------
+
+t="resolves the latest release when VERSION is not set"
+ws=$(workspace Linux x86_64)
+real_curl=$(command -v curl)
+# The installer probes the latest-release redirect with -I and reads the tag
+# off the effective URL. Answer that one call; pass everything else through to
+# the real curl, so the download and verification are not mocked away.
+cat > "$ws/fakebin/curl" <<EOF
+#!/bin/sh
+for arg in "\$@"; do
+    if [ "\$arg" = "-fsSLI" ]; then
+        printf 'https://example.invalid/releases/tag/1.2.3'
+        exit 0
+    fi
+done
+exec $real_curl "\$@"
+EOF
+chmod +x "$ws/fakebin/curl"
+TEST_VERSION=""
+run_installer "$ws"
+unset TEST_VERSION
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif [ ! -x "$ws/target/yontrack" ]; then
+    not_ok "$t" "resolved the version but installed nothing"
+elif ! printf '%s' "$out" | grep -q '1\.2\.3'; then
+    not_ok "$t" "never reported the version it resolved: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="fails clearly when the latest release cannot be resolved"
+ws=$(workspace Linux x86_64)
+# A redirect that never happened: the effective URL still ends in "latest".
+cat > "$ws/fakebin/curl" <<'EOF'
+#!/bin/sh
+for arg in "$@"; do
+    if [ "$arg" = "-fsSLI" ]; then
+        printf 'https://example.invalid/releases/latest'
+        exit 0
+    fi
+done
+exit 1
+EOF
+chmod +x "$ws/fakebin/curl"
+TEST_VERSION=""
+run_installer "$ws"
+unset TEST_VERSION
+if [ "$status" -eq 0 ]; then
+    not_ok "$t" "exited 0 without resolving a version"
+elif [ -e "$ws/target/yontrack" ]; then
+    not_ok "$t" "installed something anyway"
 else
     ok "$t"
 fi
@@ -170,9 +257,9 @@ ws=$(workspace Linux x86_64)
 printf 'tampered\n' >> "$ws/release/download/1.2.3/yontrack-linux-amd64"
 run_installer "$ws"
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 on a checksum mismatch"
+    not_ok "$t" "exited 0 on a checksum mismatch"
 elif [ -e "$ws/target/yontrack" ]; then
-    ko "$t" "installed the binary anyway"
+    not_ok "$t" "installed the binary anyway"
 else
     ok "$t"
 fi
@@ -183,9 +270,9 @@ ws=$(workspace Linux x86_64)
 rm "$ws/release/download/1.2.3/checksums.txt"
 run_installer "$ws"
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 with no checksums.txt"
+    not_ok "$t" "exited 0 with no checksums.txt"
 elif [ -e "$ws/target/yontrack" ]; then
-    ko "$t" "installed the binary anyway"
+    not_ok "$t" "installed the binary anyway"
 else
     ok "$t"
 fi
@@ -197,9 +284,9 @@ grep -v 'yontrack-linux-amd64' "$ws/release/download/1.2.3/checksums.txt" > "$ws
     && mv "$ws/sums" "$ws/release/download/1.2.3/checksums.txt"
 run_installer "$ws"
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 with the asset absent from checksums.txt"
+    not_ok "$t" "exited 0 with the asset absent from checksums.txt"
 elif [ -e "$ws/target/yontrack" ]; then
-    ko "$t" "installed the binary anyway"
+    not_ok "$t" "installed the binary anyway"
 else
     ok "$t"
 fi
@@ -212,9 +299,9 @@ ws=$(workspace Linux x86_64)
 rm "$ws/release/download/1.2.3/yontrack-linux-amd64"
 run_installer "$ws"
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 with no asset published"
+    not_ok "$t" "exited 0 with no asset published"
 elif ! printf '%s' "$out" | grep -q 'yontrack-linux-amd64'; then
-    ko "$t" "error does not name the missing asset: $out"
+    not_ok "$t" "error does not name the missing asset: $out"
 else
     ok "$t"
 fi
@@ -230,9 +317,9 @@ TEST_PATH="$ws/fakebin"
 run_installer "$ws"
 unset TEST_PATH
 if [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 with no curl available"
+    not_ok "$t" "exited 0 with no curl available"
 elif ! printf '%s' "$out" | grep -q 'curl'; then
-    ko "$t" "error does not mention curl: $out"
+    not_ok "$t" "error does not mention curl: $out"
 else
     ok "$t"
 fi
@@ -247,25 +334,27 @@ run_installer "$ws"
 if is_root; then
     skip "$t" "running as root, which can write anywhere"
 elif [ "$status" -eq 0 ]; then
-    ko "$t" "exited 0 against an unwritable directory"
+    not_ok "$t" "exited 0 against an unwritable directory"
 elif [ -e "$ws/target/yontrack" ]; then
-    ko "$t" "installed into an unwritable directory"
+    not_ok "$t" "installed into an unwritable directory"
 else
     ok "$t"
 fi
 chmod 755 "$ws/target"
 rm -rf "$ws"
 
-t="offers both sudo and INSTALL_DIR when it cannot write"
+t="does not tell anyone to pipe this script into sudo"
 ws=$(workspace Linux x86_64)
 chmod 555 "$ws/target"
 run_installer "$ws"
 if is_root; then
     skip "$t" "running as root, which can write anywhere"
-elif ! printf '%s' "$out" | grep -q 'sudo'; then
-    ko "$t" "no sudo command offered: $out"
+elif printf '%s' "$out" | grep -q 'curl.*| *sudo'; then
+    not_ok "$t" "told the user to pipe a downloaded script into sudo: $out"
 elif ! printf '%s' "$out" | grep -q 'INSTALL_DIR'; then
-    ko "$t" "no INSTALL_DIR alternative offered: $out"
+    not_ok "$t" "no privilege-free alternative offered: $out"
+elif ! printf '%s' "$out" | grep -q 'sudo sh install.sh'; then
+    not_ok "$t" "no reviewable sudo route offered: $out"
 else
     ok "$t"
 fi
@@ -277,9 +366,9 @@ ws=$(workspace Linux x86_64)
 rmdir "$ws/target"
 run_installer "$ws"
 if [ "$status" -ne 0 ]; then
-    ko "$t" "exited $status: $out"
+    not_ok "$t" "exited $status: $out"
 elif [ ! -x "$ws/target/yontrack" ]; then
-    ko "$t" "did not create the directory and install into it"
+    not_ok "$t" "did not create the directory and install into it"
 else
     ok "$t"
 fi
@@ -293,9 +382,9 @@ printf 'old version\n' > "$ws/target/yontrack"
 chmod 755 "$ws/target/yontrack"
 run_installer "$ws"
 if [ "$status" -ne 0 ]; then
-    ko "$t" "exited $status: $out"
+    not_ok "$t" "exited $status: $out"
 elif ! grep -q 'fake yontrack' "$ws/target/yontrack"; then
-    ko "$t" "did not replace the existing binary"
+    not_ok "$t" "did not replace the existing binary"
 else
     ok "$t"
 fi

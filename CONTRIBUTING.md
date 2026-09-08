@@ -17,6 +17,13 @@ To run the tests locally:
 go test -v ./...
 ```
 
+The installer is shell, not Go, and has its own suite. It fakes `uname` and
+serves a release fixture over `file://`, so it needs no network:
+
+```shell
+./install_test.sh
+```
+
 ## Adding a command
 
 # Releasing
