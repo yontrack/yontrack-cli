@@ -26,7 +26,7 @@ var branchAutoVersioningCmd = &cobra.Command{
 
 This sets up the auto-versioning for a branch from a YAML file. The path defaults to ".ontrack/auto-versioning.yaml".
 
-The format of this file is full described in the Ontrack documentation.
+The format of this file is full described in the Yontrack documentation.
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		project, branch, err := utils.GetProjectBranchFlags(cmd, false, true)

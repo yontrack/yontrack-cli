@@ -21,7 +21,7 @@ The simplest form is:
 
     yontrack validate -p PROJECT -b BRANCH -n BUILD -v VALIDATION -s STATUS
 
-where 'STATUS' is a valid Ontrack status, like 'PASSED', 'WARNING' or 'FAILED'.
+where 'STATUS' is a valid Yontrack status, like 'PASSED', 'WARNING' or 'FAILED'.
 
 In case there is some data to be passed to the validation:
 

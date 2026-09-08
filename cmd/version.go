@@ -38,7 +38,7 @@ var versionOntrack bool
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Displays version information",
-	Long: `Displays the version of the CLI and the remote Ontrack instance:
+	Long: `Displays the version of the CLI and the remote Yontrack instance:
 
     yontrack version
 
@@ -46,7 +46,7 @@ To display only the CLI version, run:
 
 	yontrack version --cli
 
-To display only the Ontrack version, run:
+To display only the Yontrack version, run:
 
 	yontrack version --ontrack
 `,
@@ -90,8 +90,8 @@ func version() error {
 	}
 	if both {
 		fmt.Printf("CLI Version %s\n", config.Version)
-		fmt.Printf("Ontrack URL %s\n", ontrackURL)
-		fmt.Printf("Ontrack Version %s\n", ontrackVersion)
+		fmt.Printf("Yontrack URL %s\n", ontrackURL)
+		fmt.Printf("Yontrack Version %s\n", ontrackVersion)
 	} else if versionCli {
 		fmt.Println(config.Version)
 	} else if versionOntrack {
@@ -114,5 +114,5 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	versionCmd.Flags().BoolVarP(&versionCli, "cli", "c", false, "Displays the CLI version")
-	versionCmd.Flags().BoolVarP(&versionOntrack, "ontrack", "o", false, "Displays the Ontrack version for the current configuration")
+	versionCmd.Flags().BoolVarP(&versionOntrack, "ontrack", "o", false, "Displays the Yontrack version for the current configuration")
 }

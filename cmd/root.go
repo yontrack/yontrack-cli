@@ -30,10 +30,10 @@ import (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "yontrack",
-	Short: "Ontrack Command Line Interface",
-	Long: `The Ontrack CLI allows you to communicate with an Ontrack server.
+	Short: "Yontrack Command Line Interface",
+	Long: `The Yontrack CLI allows you to communicate with a Yontrack server.
 
-First, you need to configure the connection to Ontrack. For example:
+First, you need to configure the connection to Yontrack. For example:
 
 	yontrack config create local http://localhost:8080 --username <user> --password <password>
 	

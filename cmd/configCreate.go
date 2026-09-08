@@ -37,7 +37,7 @@ var connectionRetry config.ConnectionRetry
 var configCreateCmd = &cobra.Command{
 	Use:   "create NAME URL",
 	Short: "Creates a new configuration",
-	Long: `To create a 'local' configuration to connect to a local instance of Ontrack 
+	Long: `To create a 'local' configuration to connect to a local instance of Yontrack 
 using a username and a password:
 	
 	yontrack config create local http://localhost:8080 --username <username> --password <password>

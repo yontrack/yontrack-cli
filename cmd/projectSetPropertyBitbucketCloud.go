@@ -131,7 +131,7 @@ func init() {
 	projectSetPropertyBitbucketCloudCmd.Flags().StringP("configuration", "c", "", "Name of the Bitbucket Cloud configuration to use")
 	projectSetPropertyBitbucketCloudCmd.Flags().StringP("repository", "r", "", "Bitbucket Cloud repository to use")
 	projectSetPropertyBitbucketCloudCmd.Flags().Int("indexation", 0, "Repository interval to use (in minutes)")
-	projectSetPropertyBitbucketCloudCmd.Flags().String("issue-service", "", "Issue identifier to use, for example jira//name where name is the name of the JIRA configuration in Ontrack.")
+	projectSetPropertyBitbucketCloudCmd.Flags().String("issue-service", "", "Issue identifier to use, for example jira//name where name is the name of the JIRA configuration in Yontrack.")
 
 	projectSetPropertyBitbucketCloudCmd.MarkFlagRequired("configuration")
 	projectSetPropertyBitbucketCloudCmd.MarkFlagRequired("repository")

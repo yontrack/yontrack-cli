@@ -70,7 +70,7 @@ func entityInput(entityNames map[string]string) string {
 	return strings.Join(vars, ", ")
 }
 
-// PropertyMapping Mapping of properties short names x entity ==> FQCN of the property in Ontrack
+// PropertyMapping Mapping of properties short names x entity ==> FQCN of the property in Yontrack
 var PropertyMapping = map[string]map[string]string{
 	"project": {
 		"gitHub": "net.nemerosa.ontrack.extension.github.property.GitHubProjectConfigurationPropertyType",

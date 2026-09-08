@@ -10,7 +10,7 @@ import (
 	config "yontrack/config"
 )
 
-// GraphQLCall performs a GraphQL query/mutation to Ontrack
+// GraphQLCall performs a GraphQL query/mutation to Yontrack
 func GraphQLCall(cfg *config.Config, query string, variables map[string]interface{}, data interface{}) error {
 
 	// If config is disabled, skips the call

@@ -268,7 +268,7 @@ func init() {
 	buildChangelogCmd.AddCommand(buildChangelogExportCmd)
 
 	buildChangelogExportCmd.Flags().String("format", "", "Format of the changelog: text (default), markdown or html")
-	buildChangelogExportCmd.Flags().String("grouping", "", "Grouping specification (see Ontrack doc)")
+	buildChangelogExportCmd.Flags().String("grouping", "", "Grouping specification (see Yontrack doc)")
 	buildChangelogExportCmd.Flags().String("alt-group", "", "Name of the group for unclassified issues")
 	buildChangelogExportCmd.Flags().String("exclude", "", "Comma separated list of issue types to ignore")
 }

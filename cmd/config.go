@@ -28,12 +28,12 @@ import (
 // configCmd represents the config command
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Management of Ontrack configurations",
-	Long: `The 'config' command allows you to manage the connections to remote Ontrack instances
+	Short: "Management of Yontrack configurations",
+	Long: `The 'config' command allows you to manage the connections to remote Yontrack instances
 in different configurations, and to reuse them.
 
 By default, no configuration is present, and you need to create one. For example, to create
-a 'local' configuration to connect to a local instance of Ontrack using a username and a password:
+a 'local' configuration to connect to a local instance of Yontrack using a username and a password:
 
 	yontrack config create local http://localhost:8080 --username <username> --password <password>
 	

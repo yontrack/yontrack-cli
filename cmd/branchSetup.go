@@ -38,7 +38,7 @@ var branchSetupCmd = &cobra.Command{
 
     yontrack branch setup --project PROJECT --branch BRANCH
 
-The BRANCH name will be adapted to fit Ontrack naming conventions, so you
+The BRANCH name will be adapted to fit Yontrack naming conventions, so you
 can directly give the name of the Git branch.
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {

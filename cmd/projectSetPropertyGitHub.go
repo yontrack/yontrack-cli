@@ -130,7 +130,7 @@ func init() {
 	projectSetPropertyGitHubCmd.Flags().StringP("configuration", "c", "", "Name of the GitHub configuration to use")
 	projectSetPropertyGitHubCmd.Flags().StringP("repository", "r", "", "GitHub repository to use, in the form of `organization/name`")
 	projectSetPropertyGitHubCmd.Flags().Int("indexation", 0, "GitHub repository interval to use")
-	projectSetPropertyGitHubCmd.Flags().String("issue-service", "", "Issue identifier to use, for example jira//name where name is the name of the JIRA configuration in Ontrack.")
+	projectSetPropertyGitHubCmd.Flags().String("issue-service", "", "Issue identifier to use, for example jira//name where name is the name of the JIRA configuration in Yontrack.")
 
 	projectSetPropertyGitHubCmd.MarkFlagRequired("configuration")
 	projectSetPropertyGitHubCmd.MarkFlagRequired("repository")
