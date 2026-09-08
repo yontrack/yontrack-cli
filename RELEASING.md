@@ -34,6 +34,14 @@ the issue labels decide the bump:
 Additive changes are a **minor**: a new command, or a new flag on an existing
 one, is still a minor even though nothing broke. A patch is for fixes only.
 
+The table is about the **public surface** — the commands, flags and output a
+user of the CLI meets. An `enhancement` that touches nothing a user can observe
+does not force a minor. 5.4.1 is the precedent: it carried five enhancements
+(a glossary, an ADR, shellcheck in CI, a build-artifact check, an installer CI
+matrix) and one bug fix, and shipped as a patch because the only change visible
+from outside was the bug fix. If you are unsure whether something is visible,
+ask what a user would notice differently after upgrading.
+
 To read the labels of everything in the range:
 
 ```bash
@@ -54,6 +62,17 @@ The command above prints the labels of every issue in the range; each one should
 carry exactly one of the three.
 
 ## 3. Preview the changelog
+
+Do this every time. It is the step that catches issues appearing in the release
+notes that were never implemented.
+
+Yontrack collects **every** `#123` in a commit message, not just the one the
+subject line starts with. A commit body saying "this blocks #58" enrols #58 in
+the changelog, and the notes then claim it shipped. This is how 5.4.0 came to
+list three issues that did not exist in it. Write cross-references so they are
+not harvested — `yontrack-cli#58`, or just "issue 58" in prose — and keep the
+issue the commit closes in the subject line where it belongs.
+
 
 The release body is produced by Yontrack, from the commits between the last
 build promoted to `RELEASE` and the one being released. To see it before
