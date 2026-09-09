@@ -49,17 +49,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Tags deliberately older than the runner that builds them.
-          # Homebrew pours the newest bottle at or below the running system,
-          # matching on architecture, so an old tag covers every later
-          # version. Sound only because the payload is a static Go binary
-          # with no SDK coupling -- see docs/adr/0003-homebrew-bottles.md.
+          # A tag deliberately older than the runner that builds it. Homebrew
+          # pours the newest bottle at or below the running system, matching
+          # on architecture, so an old tag covers every later version. Sound
+          # only because the payload is a static Go binary with no SDK
+          # coupling -- see docs/adr/0003-homebrew-bottles.md, which also
+          # records why this list is one entry and not four.
           - os: macos-latest
             tag: arm64_ventura
-          - os: ubuntu-latest
-            tag: x86_64_linux
-          - os: ubuntu-24.04-arm
-            tag: arm64_linux
     steps:
       - uses: actions/checkout@v4
 
