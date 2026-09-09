@@ -75,6 +75,28 @@ It would also cost something: the hosted Ubuntu images no longer ship
 Homebrew — `command -v brew` fails on `ubuntu-latest` — so bottling Linux
 would mean installing Homebrew from scratch on two runners per release.
 
+## The tag has to stay a macOS version Homebrew knows
+
+`find_older_compatible_tag` compares with `to_macos_version`, and swallows the
+failure:
+
+```ruby
+candidate.to_macos_version <= tag_version
+rescue MacOSVersion::Error
+  false
+```
+
+So when Ventura eventually ages out of Homebrew's known versions, the bottle
+will not error — it will be *ignored*, and every Apple Silicon install will
+quietly go back to the source path and the Command Line Tools check. Nothing
+fails loudly when that happens.
+
+The `Homebrew` job in `go.yml` installs from the tap on every push, so the
+symptom is reachable, but it will show up as a slow install rather than a red
+build. If bottles ever stop being poured for no apparent reason, this is the
+first thing to check, and the fix is to move the tag in `bottle.yml` up to the
+oldest macOS Homebrew still supports.
+
 ## What would change the answer
 
 An Intel bottle, if larger-runner minutes stop mattering or the population
