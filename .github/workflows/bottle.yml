@@ -94,15 +94,15 @@ jobs:
           # formula declares: a standalone binary references nothing under the
           # Homebrew prefix, so the bottle is valid wherever that prefix is.
           #
-          # --no-all-checks so brew never writes a second, `all`-tagged
-          # tarball beside the one we publish, which would leave the rename
-          # below with two files and no way to choose.
+          # No --no-all-checks here: it is rejected outside --merge mode.
+          # The single-tarball assertion in the next step is what guards the
+          # rename against brew writing an `all` bottle beside the tagged one.
           #
           # No --root-url on purpose. It would only reach the JSON sidecar,
           # which nothing here reads, while the root_url the formula actually
           # carries is written by homebrew_formula.sh. Setting it in both
           # places invites changing one and shipping the other.
-          brew bottle --skip-relocation --no-rebuild --no-all-checks \
+          brew bottle --skip-relocation --no-rebuild \
             yontrack/scratch/yontrack
 
       # `brew bottle` writes name--version.tag.bottle.tar.gz, with two dashes,
