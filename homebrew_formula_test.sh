@@ -198,6 +198,134 @@ else
     ok "$t"
 fi
 
+# --- the bottle block ------------------------------------------------------
+
+# Writes a bottle manifest naming one tag per line, and echoes its path.
+bottles() {
+    bf="$1/bottles.txt"
+    : > "$bf"
+    shift
+    for tag in "$@"; do
+        printf '%s  %s\n' "$(hash_for "bottle-$tag")" "$tag" >> "$bf"
+    done
+    printf '%s' "$bf"
+}
+
+# The formula has to be renderable without bottles, because that is the
+# version the release installs in order to build them. A bottle block naming
+# hashes that do not exist yet would make it uninstallable.
+t="renders no bottle block when given no manifest"
+ws=$(workspace)
+run_generator 9.9.9 "$ws/checksums.txt"
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif printf '%s\n' "$out" | grep -q 'bottle do'; then
+    not_ok "$t" "rendered a bottle block anyway: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="renders a bottle block from a manifest"
+ws=$(workspace)
+bf=$(bottles "$ws" arm64_ventura x86_64_linux arm64_linux)
+run_generator 9.9.9 "$ws/checksums.txt" "$bf"
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif ! printf '%s\n' "$out" | grep -q '^  bottle do$'; then
+    not_ok "$t" "no bottle block: $out"
+elif ! printf '%s\n' "$out" | grep -q 'root_url "https://github.com/yontrack/yontrack-cli/releases/download/9\.9\.9"'; then
+    not_ok "$t" "the root_url does not point at the release: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="pins each bottle tag to its own hash"
+ws=$(workspace)
+bf=$(bottles "$ws" arm64_ventura x86_64_linux arm64_linux)
+run_generator 9.9.9 "$ws/checksums.txt" "$bf"
+wrong=""
+for tag in arm64_ventura x86_64_linux arm64_linux; do
+    line=$(printf '%s\n' "$out" | grep "$tag:" || true)
+    printf '%s' "$line" | grep -q "$(hash_for "bottle-$tag")" || wrong="$wrong $tag"
+done
+if [ -n "$wrong" ]; then
+    not_ok "$t" "wrong or missing bottle hash for:$wrong"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+# A standalone Go binary references nothing under the Homebrew prefix, so the
+# bottle is valid wherever the prefix happens to be. Without this, Homebrew
+# refuses to pour it into a non-default prefix.
+t="declares the bottles as relocatable"
+ws=$(workspace)
+bf=$(bottles "$ws" arm64_ventura x86_64_linux arm64_linux)
+run_generator 9.9.9 "$ws/checksums.txt" "$bf"
+relocatable=$(printf '%s\n' "$out" | grep -c 'cellar: :any_skip_relocation' || true)
+if [ "$relocatable" -eq 3 ]; then
+    ok "$t"
+else
+    not_ok "$t" "expected 3 relocatable bottles, found $relocatable: $out"
+fi
+rm -rf "$ws"
+
+# Only the tags the manifest names. A tag rendered without a bottle behind it
+# sends Homebrew to a 404 rather than to the source path.
+t="renders only the tags the manifest names"
+ws=$(workspace)
+bf=$(bottles "$ws" arm64_ventura)
+run_generator 9.9.9 "$ws/checksums.txt" "$bf"
+if printf '%s\n' "$out" | grep -qE 'x86_64_linux:|arm64_linux:'; then
+    not_ok "$t" "rendered a tag the manifest does not name: $out"
+elif [ "$(printf '%s\n' "$out" | grep -c 'cellar:' || true)" -ne 1 ]; then
+    not_ok "$t" "expected exactly one bottle: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="refuses to render from a bottle hash that is not a sha256"
+ws=$(workspace)
+bf="$ws/bottles.txt"
+printf 'deadbeef  arm64_ventura\n' > "$bf"
+run_generator 9.9.9 "$ws/checksums.txt" "$bf"
+if [ "$status" -eq 0 ]; then
+    not_ok "$t" "rendered a bottle block pinning a hash that is not a sha256: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+t="reports a bottle manifest that is not there"
+ws=$(workspace)
+run_generator 9.9.9 "$ws/checksums.txt" /nonexistent/bottles.txt
+if [ "$status" -eq 0 ]; then
+    not_ok "$t" "exited 0: $out"
+elif ! printf '%s' "$out" | grep -q 'does not exist'; then
+    not_ok "$t" "unhelpful error: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
+# An empty manifest is what a release with no bottles produces. It must render
+# a working formula, not an empty bottle block, which Homebrew rejects.
+t="renders no bottle block from an empty manifest"
+ws=$(workspace)
+: > "$ws/bottles.txt"
+run_generator 9.9.9 "$ws/checksums.txt" "$ws/bottles.txt"
+if [ "$status" -ne 0 ]; then
+    not_ok "$t" "exited $status: $out"
+elif printf '%s\n' "$out" | grep -q 'bottle do'; then
+    not_ok "$t" "rendered an empty bottle block: $out"
+else
+    ok "$t"
+fi
+rm -rf "$ws"
+
 # --- the formula is Ruby ---------------------------------------------------
 
 # Homebrew evaluates the formula as Ruby, so a syntax error is an install
@@ -206,12 +334,20 @@ fi
 t="renders syntactically valid Ruby"
 if command -v ruby > /dev/null 2>&1; then
     ws=$(workspace)
-    run_generator 9.9.9 "$ws/checksums.txt"
-    printf '%s\n' "$out" > "$ws/yontrack.rb"
-    if syntax=$(ruby -c "$ws/yontrack.rb" 2>&1); then
-        ok "$t"
+    bf=$(bottles "$ws" arm64_ventura x86_64_linux arm64_linux)
+    invalid=""
+    # Both shapes, because the release renders each of them in turn.
+    for args in "$ws/checksums.txt" "$ws/checksums.txt $bf"; do
+        # shellcheck disable=SC2086
+        run_generator 9.9.9 $args
+        printf '%s\n' "$out" > "$ws/yontrack.rb"
+        syntax=$(ruby -c "$ws/yontrack.rb" 2>&1) || invalid="$invalid
+$syntax"
+    done
+    if [ -n "$invalid" ]; then
+        not_ok "$t" "$invalid"
     else
-        not_ok "$t" "$syntax"
+        ok "$t"
     fi
     rm -rf "$ws"
 else

@@ -1,0 +1,190 @@
+name: Bottle
+
+# Builds the Homebrew bottles for a release that already exists, so that
+# `brew install` pours a tarball instead of taking Homebrew's source path,
+# which demands current Command Line Tools to copy one static binary.
+#
+# Callable from the release workflow, and dispatchable by hand against any
+# published tag. The dispatch form is how this gets exercised without cutting
+# a release: it builds and checks the bottles, and uploads nothing unless
+# asked to.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The released tag to bottle
+        required: true
+        type: string
+      publish:
+        description: Upload the bottles to that release
+        type: boolean
+        default: true
+    outputs:
+      manifest:
+        description: Name of the artifact holding the bottle manifest
+        value: bottle-manifest
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The released tag to bottle, e.g. 5.5.0
+        required: true
+        type: string
+      publish:
+        description: Upload the bottles to that release (otherwise build and check only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+
+  build:
+    name: ${{ matrix.tag }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Every tag reports independently: one platform without a usable
+      # Homebrew is worth knowing about precisely, not as a single red cross.
+      fail-fast: false
+      matrix:
+        include:
+          # Tags deliberately older than the runner that builds them.
+          # Homebrew pours the newest bottle at or below the running system,
+          # matching on architecture, so an old tag covers every later
+          # version. Sound only because the payload is a static Go binary
+          # with no SDK coupling -- see docs/adr/0003-homebrew-bottles.md.
+          - os: macos-latest
+            tag: arm64_ventura
+          - os: ubuntu-latest
+            tag: x86_64_linux
+          - os: ubuntu-24.04-arm
+            tag: arm64_linux
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reports what this runner actually offers before anything depends on
+      # it. Homebrew is preinstalled on the hosted images, but that is not a
+      # promise on every architecture, and a missing brew should say so here
+      # rather than three steps later.
+      - name: What this runner has
+        run: |
+          uname -sm
+          command -v brew || { echo "::error::no Homebrew on ${{ matrix.os }}"; exit 1; }
+          brew --version | head -1
+          echo "native bottle tag: $(brew ruby -e 'puts Utils::Bottles.tag')"
+          echo "building as:       ${{ matrix.tag }}"
+
+      - name: Fetch the release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.version }}" -p checksums.txt -R "${{ github.repository }}"
+
+      # Without a bottle block: this is the formula the bottle is built from,
+      # and it cannot name a bottle that does not exist yet.
+      - name: Render the formula
+        run: ./homebrew_formula.sh "${{ inputs.version }}" checksums.txt > yontrack.rb
+
+      - name: Build the bottle
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ANALYTICS: 1
+          HOMEBREW_NO_INSTALL_FROM_API: 1
+        run: |
+          set -eu
+          brew tap-new yontrack/scratch --no-git
+          cp yontrack.rb "$(brew --repository)/Library/Taps/yontrack/homebrew-scratch/Formula/yontrack.rb"
+
+          brew install --build-bottle yontrack/scratch/yontrack
+
+          # --skip-relocation to match the `cellar: :any_skip_relocation` the
+          # formula declares: a standalone binary references nothing under the
+          # Homebrew prefix, so the bottle is valid wherever that prefix is.
+          brew bottle --skip-relocation --no-rebuild \
+            --root-url="https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}" \
+            yontrack/scratch/yontrack
+
+      # `brew bottle` writes name--version.tag.bottle.tar.gz, with two dashes,
+      # but the formula asks for name-version.tag.bottle.tar.gz with one. The
+      # rename is also where the runner's native tag becomes the tag we
+      # publish under. Renaming cannot change the hash, which is over content.
+      - name: Name it what the formula will ask for
+        id: bottle
+        run: |
+          set -eu
+          built=$(ls ./*.bottle.tar.gz)
+          echo "brew wrote: $built"
+
+          asset="yontrack-${{ inputs.version }}.${{ matrix.tag }}.bottle.tar.gz"
+          mv "$built" "$asset"
+
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "sha=$(shasum -a 256 "$asset" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # A bottle is poured by unpacking it straight into the Cellar, so its
+      # layout is the whole contract. A tarball that unpacks anywhere else
+      # installs nothing and fails at link time, on the user's machine.
+      - name: The bottle has the layout Homebrew pours
+        env:
+          ASSET: ${{ steps.bottle.outputs.asset }}
+        run: |
+          set -eu
+          tar tzf "$ASSET"
+
+          tar tzf "$ASSET" | grep -qx "yontrack/${{ inputs.version }}/bin/yontrack" \
+            || { echo "::error::no yontrack/${{ inputs.version }}/bin/yontrack in the bottle"; exit 1; }
+
+          # And the binary in it is the real one, for this platform.
+          tar xzf "$ASSET" -C "$RUNNER_TEMP"
+          extracted="$RUNNER_TEMP/yontrack/${{ inputs.version }}/bin/yontrack"
+          chmod +x "$extracted"
+          test "$("$extracted" version --cli)" = "${{ inputs.version }}" \
+            || { echo "::error::the binary in the bottle does not report ${{ inputs.version }}"; exit 1; }
+          echo "bottled binary reports ${{ inputs.version }}"
+
+      - name: Record the hash
+        run: printf '%s  %s\n' "${{ steps.bottle.outputs.sha }}" "${{ matrix.tag }}" > "bottle-${{ matrix.tag }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bottle-${{ matrix.tag }}
+          path: |
+            ${{ steps.bottle.outputs.asset }}
+            bottle-${{ matrix.tag }}.txt
+          if-no-files-found: error
+
+  collect:
+    name: Collect
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bottle-*
+          merge-multiple: true
+
+      # Ordered so the rendered formula is stable between releases: an
+      # unordered manifest would rewrite the bottle block on every tag and
+      # make the tap's history unreadable.
+      - name: Build the manifest
+        run: |
+          set -eu
+          cat bottle-*.txt | sort -k2 > bottles.txt
+          echo "--- bottles.txt"
+          cat bottles.txt
+          echo "--- assets"
+          ls -la ./*.bottle.tar.gz
+
+      - name: Upload the bottles to the release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.version }}" ./*.bottle.tar.gz \
+            --clobber -R "${{ github.repository }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bottle-manifest
+          path: bottles.txt
+          if-no-files-found: error
