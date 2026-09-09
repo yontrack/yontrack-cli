@@ -1,0 +1,22 @@
+name: Bottle trial
+
+# TEMPORARY -- delete before merging.
+#
+# workflow_dispatch only fires for workflows already on the default branch,
+# so bottle.yml cannot be exercised from a branch without this. It builds the
+# bottles for an already-published release and uploads nothing.
+
+on:
+  push:
+    branches:
+      - 67-bottle-the-formula
+
+permissions:
+  contents: write
+
+jobs:
+  trial:
+    uses: ./.github/workflows/bottle.yml
+    with:
+      version: "5.5.0"
+      publish: false
