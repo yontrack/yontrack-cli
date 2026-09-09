@@ -45,6 +45,11 @@ jobs:
       - name: Installer tests
         run: ./install_test.sh
 
+      # The formula is rendered at release time, when a mistake in it is
+      # already published. This is the only chance to catch one first.
+      - name: Homebrew formula tests
+        run: ./homebrew_formula_test.sh
+
       - if: ${{ github.event_name != 'pull_request' }}
         name: Yontrack setup
         run: |
@@ -127,6 +132,47 @@ jobs:
           if xattr "$HOME/bin/yontrack" | grep -q com.apple.quarantine; then
             echo "the installed binary carries com.apple.quarantine"
             xattr -l "$HOME/bin/yontrack"
+            exit 1
+          fi
+          echo "no quarantine attribute, as expected"
+
+  # Installs from the published tap, for the same reason the installer job
+  # installs the published release: what a `brew` user meets is the formula in
+  # yontrack/homebrew-tap, which no commit here can be checked against.
+  # homebrew_formula_test.sh covers what the formula says; only this covers
+  # whether Homebrew accepts it.
+  #
+  # This cannot pass until a release has pushed a formula to the tap.
+  homebrew:
+    name: Homebrew
+    runs-on: macos-latest
+    steps:
+      - name: Install from the tap
+        run: |
+          brew tap yontrack/tap
+          # Homebrew 6 wants third-party taps trusted before it loads them.
+          # `brew trust` does not exist before then, so this is advisory --
+          # the install on the next line is the assertion.
+          brew trust yontrack/tap || true
+          brew install yontrack/tap/yontrack
+
+      - name: The installed binary runs and reports a release version
+        run: |
+          yontrack version --cli
+          yontrack version --cli | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'
+
+      # Formulae are not quarantined and casks are, which is the whole reason
+      # the tap ships a formula. If this attribute ever appears, that has
+      # stopped being true.
+      - name: The installed binary is not quarantined
+        run: |
+          target="$(brew --prefix)/bin/yontrack"
+          # Asserted first: `xattr` on a missing file reports no attribute,
+          # so without this the check passes when nothing was installed.
+          test -x "$target"
+          if xattr "$target" | grep -q com.apple.quarantine; then
+            echo "the installed binary carries com.apple.quarantine"
+            xattr -l "$target"
             exit 1
           fi
           echo "no quarantine attribute, as expected"

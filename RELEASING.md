@@ -4,8 +4,8 @@ Releasing
 A release is cut by pushing a tag. Everything after that is automated by
 [`.github/workflows/tag.yml`](.github/workflows/tag.yml): the binaries are
 built, the changelog is generated from Yontrack, the GitHub release is created
-with that changelog as its body, and the build is validated and labelled in
-Yontrack.
+with that changelog as its body, the build is validated and labelled in
+Yontrack, and the Homebrew formula is bumped in the tap.
 
 So the whole job is: **pick the right version, check the changelog will read
 well, push the tag.**
@@ -120,8 +120,35 @@ For the record, so the manual steps above are not reinvented:
 4. Creates the GitHub release, with that changelog as the body and the binaries
    attached
 5. Validates `GITHUB.RELEASE` on the build and sets its `release` property
+6. Renders the Homebrew formula with `homebrew_formula.sh` and pushes it to
+   [`yontrack/homebrew-tap`](https://github.com/yontrack/homebrew-tap), which is
+   what makes `brew install yontrack/tap/yontrack` offer the new version
 
-Steps 2 to 5 need `vars.YONTRACK_URL` and `secrets.YONTRACK_TOKEN`.
+Steps 2 to 5 need `vars.YONTRACK_URL` and `secrets.YONTRACK_TOKEN`. Step 6
+needs `secrets.HOMEBREW_TAP_TOKEN`.
+
+## The Homebrew tap token
+
+`secrets.GITHUB_TOKEN` is scoped to this repository and cannot push to another
+one, so the formula bump needs its own credential: a fine-grained personal
+access token, `Contents: read and write` on `yontrack/homebrew-tap` and nothing
+else, held here as `HOMEBREW_TAP_TOKEN`.
+
+Fine-grained tokens expire. When one does, the release itself still succeeds —
+the tap step runs last for that reason — and the workflow then fails with the
+formula left at the previous version. Mint a new token, set the secret, and
+re-run the failed job; the step is safe to repeat, and does nothing at all if
+the formula is already current.
+
+To see what the next release would publish, without releasing anything:
+
+```bash
+gh release download <last tag> -p checksums.txt
+./homebrew_formula.sh <next version> checksums.txt
+```
+
+The hashes will be the previous release's, so this shows the shape rather than
+the content. `./homebrew_formula_test.sh` is what checks the shape is right.
 
 ## After the release
 

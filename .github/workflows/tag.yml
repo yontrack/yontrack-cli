@@ -76,3 +76,47 @@ jobs:
           ./yontrack validate --validation GITHUB.RELEASE --status PASSED
           # Release label in Ontrack
           ./yontrack build set-property release $VERSION
+
+      # Last, because the formula points at release assets that have to exist
+      # before anyone runs `brew install`, and because a tap that fails to
+      # update should not hold up the Yontrack bookkeeping above.
+      - name: Homebrew tap
+        env:
+          # A fine-grained PAT with Contents: read and write on
+          # yontrack/homebrew-tap. GITHUB_TOKEN is scoped to this repository
+          # and cannot push to another one. See RELEASING.md.
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -eu
+
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set. ${VERSION} is released, but brew install still offers the previous version. See RELEASING.md."
+            exit 1
+          fi
+
+          # Rendered from the checksums.txt built earlier in this job — the
+          # same file attached to the release, so the formula pins what was
+          # published rather than a second hash of a second download.
+          ./homebrew_formula.sh "${VERSION}" checksums.txt > "${RUNNER_TEMP}/yontrack.rb"
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/yontrack/homebrew-tap.git" \
+            "${RUNNER_TEMP}/tap"
+
+          mkdir -p "${RUNNER_TEMP}/tap/Formula"
+          cp "${RUNNER_TEMP}/yontrack.rb" "${RUNNER_TEMP}/tap/Formula/yontrack.rb"
+
+          cd "${RUNNER_TEMP}/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/yontrack.rb
+
+          # Re-running a tag renders exactly what is already there. Nothing to
+          # commit is the expected outcome then, not a failure.
+          if git diff --cached --quiet; then
+            echo "The tap already offers ${VERSION}"
+            exit 0
+          fi
+
+          git commit -m "yontrack ${VERSION}"
+          git push

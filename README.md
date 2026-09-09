@@ -13,7 +13,36 @@ The Yontrack CLI is a Command Line Interface tool, available on many platforms, 
 
 # Installation
 
-On macOS and Linux:
+## Homebrew
+
+On macOS, and on Linux where Homebrew is installed:
+
+```bash
+brew install yontrack/tap/yontrack
+```
+
+After that, `brew upgrade` carries the CLI along with everything else Homebrew manages, which is the reason to prefer this route on macOS.
+
+It installs the very binary the release publishes, pinned to the same sha256 the installer below verifies, so the two routes deliver identical bytes. The tap ships a *formula* rather than a cask on purpose: Homebrew quarantines casks and does not quarantine formulae, so this route never meets the Gatekeeper dialog described at the end of this section.
+
+Homebrew 6 asks that third-party taps be trusted before it loads them. If it says `yontrack/tap` is not trusted:
+
+```bash
+brew trust --formula yontrack/tap/yontrack
+```
+
+One quirk to know about. The formula ships no prebuilt bottle, and Homebrew runs its build-from-source checks on any formula that has none — so it insists on current Command Line Tools even though nothing here is compiled. Installing Homebrew installs them, so this normally passes unnoticed; it bites after a macOS upgrade that leaves them behind. If `brew install` stops with *"Your Command Line Tools are too outdated"*, that check is what stopped it:
+
+```bash
+sudo rm -rf /Library/Developer/CommandLineTools
+sudo xcode-select --install
+```
+
+The install script below has no such requirement, and is the way in if you would rather not.
+
+## The install script
+
+On macOS and Linux, with or without Homebrew:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | sh
