@@ -20,10 +20,6 @@ on:
         description: Upload the bottles to that release
         type: boolean
         default: true
-    outputs:
-      manifest:
-        description: Name of the artifact holding the bottle manifest
-        value: bottle-manifest
   workflow_dispatch:
     inputs:
       version:
@@ -97,8 +93,16 @@ jobs:
           # --skip-relocation to match the `cellar: :any_skip_relocation` the
           # formula declares: a standalone binary references nothing under the
           # Homebrew prefix, so the bottle is valid wherever that prefix is.
-          brew bottle --skip-relocation --no-rebuild \
-            --root-url="https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}" \
+          #
+          # --no-all-checks so brew never writes a second, `all`-tagged
+          # tarball beside the one we publish, which would leave the rename
+          # below with two files and no way to choose.
+          #
+          # No --root-url on purpose. It would only reach the JSON sidecar,
+          # which nothing here reads, while the root_url the formula actually
+          # carries is written by homebrew_formula.sh. Setting it in both
+          # places invites changing one and shipping the other.
+          brew bottle --skip-relocation --no-rebuild --no-all-checks \
             yontrack/scratch/yontrack
 
       # `brew bottle` writes name--version.tag.bottle.tar.gz, with two dashes,
@@ -109,7 +113,9 @@ jobs:
         id: bottle
         run: |
           set -eu
-          built=$(ls ./*.bottle.tar.gz)
+          set -- ./*.bottle.tar.gz
+          [ "$#" -eq 1 ] || { echo "::error::expected one bottle, brew wrote $*"; exit 1; }
+          built=$1
           echo "brew wrote: $built"
 
           asset="yontrack-${{ inputs.version }}.${{ matrix.tag }}.bottle.tar.gz"
@@ -134,7 +140,13 @@ jobs:
           # And the binary in it is the real one, for this platform.
           tar xzf "$ASSET" -C "$RUNNER_TEMP"
           extracted="$RUNNER_TEMP/yontrack/${{ inputs.version }}/bin/yontrack"
-          chmod +x "$extracted"
+
+          # Asserted, not granted. Pouring a bottle unpacks it as-is, so if
+          # the tarball ever loses the executable bit then so does the user's
+          # install -- and a chmod here would hide exactly that.
+          test -x "$extracted" \
+            || { echo "::error::the binary in the bottle is not executable"; exit 1; }
+
           test "$("$extracted" version --cli)" = "${{ inputs.version }}" \
             || { echo "::error::the binary in the bottle does not report ${{ inputs.version }}"; exit 1; }
           echo "bottled binary reports ${{ inputs.version }}"

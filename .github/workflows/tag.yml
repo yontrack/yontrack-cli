@@ -9,6 +9,8 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,8 +21,11 @@ jobs:
           # drifted to 1.21.1 while go.mod had moved to 1.22.
           go-version-file: go.mod
 
-      - name: Get version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      - id: version
+        name: Get version
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Build packages
         run: |
@@ -77,10 +82,48 @@ jobs:
           # Release label in Ontrack
           ./yontrack build set-property release $VERSION
 
-      # Last, because the formula points at release assets that have to exist
-      # before anyone runs `brew install`, and because a tap that fails to
-      # update should not hold up the Yontrack bookkeeping above.
-      - name: Homebrew tap
+  # Split out of the release job because the formula names the bottles, and
+  # the bottles are built by installing the formula -- so the release has to
+  # be published, then bottled, and only then can the tap be told about it.
+  bottles:
+    name: Bottles
+    needs: release
+    uses: ./.github/workflows/bottle.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+      publish: true
+
+  # Last, because the formula points at release assets that have to exist
+  # before anyone runs `brew install`, and because a tap that fails to update
+  # should not hold up the Yontrack bookkeeping in the release job.
+  tap:
+    name: Homebrew tap
+    needs: [release, bottles]
+    # Runs even when bottling failed. An unbottled formula is what every
+    # release before this one shipped, and it installs; withholding the bump
+    # because the bottle broke would leave `brew install` on the old version,
+    # which is strictly worse than the version it replaced.
+    #
+    # `!cancelled()` rather than `always()`: cancelling a release run is how
+    # a wrong tag gets stopped, and `always()` would push its formula anyway.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the checksums and the bottle manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${VERSION}" -p checksums.txt -R "${{ github.repository }}"
+
+      - if: ${{ needs.bottles.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bottle-manifest
+
+      - name: Push the formula
         env:
           # A fine-grained PAT with Contents: read and write on
           # yontrack/homebrew-tap. GITHUB_TOKEN is scoped to this repository
@@ -94,10 +137,18 @@ jobs:
             exit 1
           fi
 
-          # Rendered from the checksums.txt built earlier in this job — the
-          # same file attached to the release, so the formula pins what was
-          # published rather than a second hash of a second download.
-          ./homebrew_formula.sh "${VERSION}" checksums.txt > "${RUNNER_TEMP}/yontrack.rb"
+          # Rendered from the release's own checksums.txt, so the formula pins
+          # what was published rather than a second hash of a second download,
+          # and from the manifest of bottles just built against it.
+          #
+          # No manifest means bottling failed. Rendering without one is a
+          # supported shape, not a broken formula: it is what the release
+          # installs to build the bottles in the first place.
+          if [ ! -f bottles.txt ]; then
+            echo "::warning::No bottle manifest, so ${VERSION} goes to the tap unbottled."
+            : > bottles.txt
+          fi
+          ./homebrew_formula.sh "${VERSION}" checksums.txt bottles.txt > "${RUNNER_TEMP}/yontrack.rb"
 
           git clone --depth 1 \
             "https://x-access-token:${TAP_TOKEN}@github.com/yontrack/homebrew-tap.git" \

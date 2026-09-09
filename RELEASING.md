@@ -120,12 +120,23 @@ For the record, so the manual steps above are not reinvented:
 4. Creates the GitHub release, with that changelog as the body and the binaries
    attached
 5. Validates `GITHUB.RELEASE` on the build and sets its `release` property
-6. Renders the Homebrew formula with `homebrew_formula.sh` and pushes it to
+6. Builds the Homebrew bottle for Apple Silicon, checks it, and uploads it to
+   the release ([`bottle.yml`](.github/workflows/bottle.yml))
+7. Renders the Homebrew formula with `homebrew_formula.sh` and pushes it to
    [`yontrack/homebrew-tap`](https://github.com/yontrack/homebrew-tap), which is
    what makes `brew install yontrack/tap/yontrack` offer the new version
 
-Steps 2 to 5 need `vars.YONTRACK_URL` and `secrets.YONTRACK_TOKEN`. Step 6
+Steps 2 to 5 need `vars.YONTRACK_URL` and `secrets.YONTRACK_TOKEN`. Step 7
 needs `secrets.HOMEBREW_TAP_TOKEN`.
+
+Step 6 failing does not hold up step 7: the formula is pushed unbottled, which
+is what every release before 5.5.0 shipped and installs fine. It does mean
+Apple Silicon users take Homebrew's source path until the next release, so a
+`No bottle manifest` warning in the run is worth chasing rather than ignoring.
+
+`bottle.yml` can be run by hand against any published tag from the Actions tab,
+which is how to test a change to it without cutting a release. Leave `publish`
+unticked and it builds and checks the bottle without uploading anything.
 
 ## The Homebrew tap token
 

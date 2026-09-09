@@ -31,14 +31,16 @@ Homebrew 6 asks that third-party taps be trusted before it loads them. If it say
 brew trust --formula yontrack/tap/yontrack
 ```
 
-One quirk to know about. The formula ships no prebuilt bottle, and Homebrew runs its build-from-source checks on any formula that has none — so it insists on current Command Line Tools even though nothing here is compiled. Installing Homebrew installs them, so this normally passes unnoticed; it bites after a macOS upgrade that leaves them behind. If `brew install` stops with *"Your Command Line Tools are too outdated"*, that check is what stopped it:
+On an Apple Silicon Mac this pours a prebuilt bottle, so it needs nothing from Xcode and takes a second or two.
+
+**On an Intel Mac** there is no bottle, and Homebrew runs its build-from-source checks on any formula without one — so it insists on current Command Line Tools even though nothing here is compiled. Installing Homebrew installs them, so this normally passes unnoticed; it bites after a macOS upgrade that leaves them behind. If `brew install` stops with *"Your Command Line Tools are too outdated"*, that check is what stopped it:
 
 ```bash
 sudo rm -rf /Library/Developer/CommandLineTools
 sudo xcode-select --install
 ```
 
-The install script below has no such requirement, and is the way in if you would rather not.
+Linux has no equivalent requirement. The install script below has none either, and is the way in if you would rather not.
 
 ## The install script
 
