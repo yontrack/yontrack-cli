@@ -548,6 +548,20 @@ yontrack project set-property --project <project> github \
 
 This command associates the project with the `yontrack/yontrack` repository, using the credentials defined by the `github.com` GitHub configuration stored in Yontrack. Additionally, Yontrack will index the content of this repository every `30` minutes and the GitHub issues will be used to track issues.
 
+For a Bitbucket Cloud repository:
+
+```bash
+# Bitbucket Cloud setup of the project
+yontrack project set-property --project <project> bitbucket-cloud \
+    --configuration bitbucket-cloud \
+    --workspace my-workspace \
+    --repository my-repository \
+    --indexation 30 \
+    --issue-service jira//my-jira
+```
+
+The `--workspace` option is the Bitbucket Cloud workspace slug the repository belongs to; the `bitbucket-cloud` configuration stored in Yontrack only holds the credentials, and can therefore be shared by projects in different workspaces.
+
 Whenever a branch is created, you associate it with the corresponding Git branch this way:
 
 ```bash

@@ -28,15 +28,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// bitbucketCloudPropertyVariables returns the variables for the
+// setProjectBitbucketCloudConfigurationProperty mutation. The workspace is a field of its own:
+// it is held by the project property, not by the Bitbucket Cloud configuration, and it is not
+// part of the repository name.
+func bitbucketCloudPropertyVariables(project string, configuration string, workspace string, repository string, indexationInterval int, issueService string) map[string]interface{} {
+	return map[string]interface{}{
+		"project":                             project,
+		"configuration":                       configuration,
+		"workspace":                           workspace,
+		"repository":                          repository,
+		"indexationInterval":                  indexationInterval,
+		"issueServiceConfigurationIdentifier": issueService,
+	}
+}
+
 // projectSetPropertyBitbucketCloudCmd represents the projectSetPropertyBitbucketCloud command
 var projectSetPropertyBitbucketCloudCmd = &cobra.Command{
 	Use:   "bitbucket-cloud",
 	Short: "Configures a project to use a Bitbucket Cloud repository",
 	Long: `Configures a project to use a Bitbucket Cloud repository.
 
+The Bitbucket Cloud configuration only holds the credentials used to connect to Bitbucket Cloud. The workspace the
+repository belongs to is set on the project, using the --workspace option.
+
 Example:
 
-	yontrack project set-property --project PROJECT bitbucket-cloud --configuration Bitbucket-Cloud --repository my-repository --issue-service jira//my-jira`,
+	yontrack project set-property --project PROJECT bitbucket-cloud --configuration Bitbucket-Cloud --workspace my-workspace --repository my-repository --issue-service jira//my-jira`,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 
@@ -46,6 +64,11 @@ Example:
 		}
 
 		configuration, err := cmd.Flags().GetString("configuration")
+		if err != nil {
+			return err
+		}
+
+		workspace, err := cmd.Flags().GetString("workspace")
 		if err != nil {
 			return err
 		}
@@ -81,6 +104,7 @@ Example:
 			mutation SetProjectBitbucketCloudConfigurationProperty(
 				$project: String!,
 				$configuration: String!,
+				$workspace: String!,
 				$repository: String!,
 				$indexationInterval: Int,
 				$issueServiceConfigurationIdentifier: String
@@ -88,6 +112,7 @@ Example:
 				setProjectBitbucketCloudConfigurationProperty(input: {
 					project: $project,
 					configuration: $configuration,
+					workspace: $workspace,
 					repository: $repository,
 					indexationInterval: $indexationInterval,
 					issueServiceConfigurationIdentifier: $issueServiceConfigurationIdentifier
@@ -97,13 +122,7 @@ Example:
 					}
 				}
 			}
-		`, map[string]interface{}{
-			"project":                             project,
-			"configuration":                       configuration,
-			"repository":                          repository,
-			"indexationInterval":                  indexation,
-			"issueServiceConfigurationIdentifier": issueService,
-		}, &data); err != nil {
+		`, bitbucketCloudPropertyVariables(project, configuration, workspace, repository, indexation, issueService), &data); err != nil {
 			return err
 		}
 
@@ -128,11 +147,13 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// projectSetPropertyBitbucketCloudCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-	projectSetPropertyBitbucketCloudCmd.Flags().StringP("configuration", "c", "", "Name of the Bitbucket Cloud configuration to use")
-	projectSetPropertyBitbucketCloudCmd.Flags().StringP("repository", "r", "", "Bitbucket Cloud repository to use")
+	projectSetPropertyBitbucketCloudCmd.Flags().StringP("configuration", "c", "", "Name of the Bitbucket Cloud configuration to use (credentials only)")
+	projectSetPropertyBitbucketCloudCmd.Flags().StringP("workspace", "w", "", "Slug of the Bitbucket Cloud workspace the repository belongs to")
+	projectSetPropertyBitbucketCloudCmd.Flags().StringP("repository", "r", "", "Bitbucket Cloud repository to use, inside the workspace")
 	projectSetPropertyBitbucketCloudCmd.Flags().Int("indexation", 0, "Repository interval to use (in minutes)")
 	projectSetPropertyBitbucketCloudCmd.Flags().String("issue-service", "", "Issue identifier to use, for example jira//name where name is the name of the JIRA configuration in Yontrack.")
 
 	projectSetPropertyBitbucketCloudCmd.MarkFlagRequired("configuration")
+	projectSetPropertyBitbucketCloudCmd.MarkFlagRequired("workspace")
 	projectSetPropertyBitbucketCloudCmd.MarkFlagRequired("repository")
 }
