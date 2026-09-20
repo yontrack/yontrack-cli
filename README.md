@@ -563,6 +563,19 @@ yontrack project set-property --project <project> bitbucket-cloud \
 
 The `--workspace` option is the Bitbucket Cloud workspace slug the repository belongs to; the `bitbucket-cloud` configuration stored in Yontrack only holds the credentials, and can therefore be shared by projects in different workspaces.
 
+For a GitLab repository:
+
+```bash
+# GitLab setup of the project
+yontrack project set-property --project <project> gitlab \
+    --configuration gitlab.com \
+    --repository my-group/my-subgroup/my-project \
+    --indexation 30 \
+    --issue-service self
+```
+
+The `--repository` option is the full GitLab project path. Subgroups are normal on GitLab, so this path can be arbitrarily deep: both `group/project` and `group/subgroup/project` are given as-is.
+
 Whenever a branch is created, you associate it with the corresponding Git branch this way:
 
 ```bash
