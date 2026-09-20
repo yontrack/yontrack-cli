@@ -624,6 +624,17 @@ yontrack validate --project <project> --branch <branch> --build <build> --valida
         --value 87
 ```
 
+* for number data type:
+
+```bash
+yontrack validate --project <project> --branch <branch> --build <build> --validation <validation> \
+    number \
+        --value 0
+```
+
+> The `--value` flag is required. For a validation stamp counting issues, where `0` means "nothing
+> found", omitting the value would otherwise record a clean result instead of failing.
+
 * for metrics data type:
 
 ```bash
