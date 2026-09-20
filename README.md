@@ -694,10 +694,22 @@ yontrack validate --project <project> --branch <branch> --build <build> --valida
         --failed 1
 ```
 
-### Run info defaults in Bitbucket Pipelines
+### Run info defaults in CI
 
-When the CLI runs inside Bitbucket Pipelines (detected using the `BITBUCKET_BUILD_NUMBER`
-environment variable), the flags which are _not_ set explicitly are defaulted:
+When the CLI recognises the CI engine it runs in, the flags which are _not_ set explicitly
+are defaulted from the environment of that engine, as described in the sections below.
+
+Flags set on the command line always take precedence, and nothing is defaulted outside of a
+recognised CI engine. The run time is never guessed: only the caller knows how long the run
+took. A value which is not available - because the variable it comes from is not set - is
+left empty rather than guessed.
+
+The engines are tried in the order of the sections below and the first one recognised wins;
+that only matters in the unlikely case where the variables of two engines are both present.
+
+#### Bitbucket Pipelines defaults
+
+Detected using the `BITBUCKET_BUILD_NUMBER` environment variable.
 
 | Flag | Default |
 |---|---|
@@ -706,11 +718,18 @@ environment variable), the flags which are _not_ set explicitly are defaulted:
 | `--trigger-type` | `commit` |
 | `--trigger-data` | `$BITBUCKET_COMMIT` |
 
-Flags set on the command line always take precedence, and nothing is defaulted outside
-of Bitbucket Pipelines. The run time is never guessed: only the caller knows how long the
-run took.
-
 > See [Bitbucket Pipelines](#bitbucket-pipelines) for the pipeline these defaults are meant for.
+
+#### GitLab CI defaults
+
+Detected using the `GITLAB_CI` environment variable, which GitLab sets to `true` in every job.
+
+| Flag | Default |
+|---|---|
+| `--source-type` | `gitlab-pipeline` |
+| `--source-uri` | `$CI_PIPELINE_URL` |
+| `--trigger-type` | `commit` |
+| `--trigger-data` | `$CI_COMMIT_SHA` |
 
 # Auto-versioning
 
@@ -1060,7 +1079,7 @@ installed by the `script` of the same step.
 
 Nothing has to be passed for the run info: inside Bitbucket Pipelines the CLI fills in the source type, the pipeline
 URL, the trigger type and the commit on its own - see
-[Run info defaults in Bitbucket Pipelines](#run-info-defaults-in-bitbucket-pipelines) for the exact values. The run time
+[Bitbucket Pipelines defaults](#bitbucket-pipelines-defaults) for the exact values. The run time
 is the exception, since only the caller knows it:
 
 ```bash

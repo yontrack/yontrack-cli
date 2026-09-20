@@ -8,11 +8,15 @@ import (
 )
 
 func InitRunInfoCommandFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().String("source-type", "", "Run info source type. Defaults to \"bitbucket-pipeline\" in Bitbucket Pipelines.")
-	cmd.PersistentFlags().String("source-uri", "", "Run info source URI. Defaults to the pipeline URL in Bitbucket Pipelines.")
-	cmd.PersistentFlags().String("trigger-type", "", "Run info trigger type. Defaults to \"commit\" in Bitbucket Pipelines.")
-	cmd.PersistentFlags().String("trigger-data", "", "Run info trigger data. Defaults to $BITBUCKET_COMMIT in Bitbucket Pipelines.")
-	cmd.PersistentFlags().Int("run-time", 0, "Run info run time (in seconds)")
+	// The defaults come from whichever CI engine is detected, so the help text
+	// describes the kind of value each flag gets rather than naming the engines
+	// and their variables one by one: that list grows with every new engine,
+	// and the README is where it is kept.
+	cmd.PersistentFlags().String("source-type", "", "Run info source type. Defaults to the name of the detected CI engine (see the README).")
+	cmd.PersistentFlags().String("source-uri", "", "Run info source URI. Defaults to the pipeline URL in the detected CI engine (see the README).")
+	cmd.PersistentFlags().String("trigger-type", "", "Run info trigger type. Defaults to \"commit\" in the detected CI engine (see the README).")
+	cmd.PersistentFlags().String("trigger-data", "", "Run info trigger data. Defaults to the commit being built in the detected CI engine (see the README).")
+	cmd.PersistentFlags().Int("run-time", 0, "Run info run time (in seconds). Never defaulted: only the caller knows how long the run took.")
 }
 
 func GetRunInfo(cmd *cobra.Command) (*client.RunInfo, error) {
@@ -38,7 +42,7 @@ func GetRunInfo(cmd *cobra.Command) (*client.RunInfo, error) {
 	}
 
 	// Fields not given on the command line are filled in from the CI
-	// environment (Bitbucket Pipelines, ...) when one is detected.
+	// environment (Bitbucket Pipelines, GitLab CI, ...) when one is detected.
 	info := applyRunInfoDefaults(client.RunInfo{
 		SourceType:  sourceType,
 		SourceURI:   sourceURI,
