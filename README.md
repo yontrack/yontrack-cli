@@ -680,6 +680,21 @@ yontrack validate --project <project> --branch <branch> --build <build> --valida
         --failed 1
 ```
 
+### Run info defaults in Bitbucket Pipelines
+
+When the CLI runs inside Bitbucket Pipelines (detected using the `BITBUCKET_BUILD_NUMBER`
+environment variable), the flags which are _not_ set explicitly are defaulted:
+
+| Flag | Default |
+|---|---|
+| `--source-type` | `bitbucket-pipeline` |
+| `--source-uri` | `https://bitbucket.org/$BITBUCKET_WORKSPACE/$BITBUCKET_REPO_SLUG/pipelines/results/$BITBUCKET_BUILD_NUMBER` |
+| `--trigger-type` | `commit` |
+| `--trigger-data` | `$BITBUCKET_COMMIT` |
+
+Flags set on the command line always take precedence, and nothing is defaulted outside
+of Bitbucket Pipelines.
+
 # Auto-versioning
 
 The Yontrack CLI can be used to set up the auto-versioning configuration for a branch.
