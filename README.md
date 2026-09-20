@@ -184,7 +184,8 @@ configuration: { }
 ```
 
 When using this configuration, Yontrack will create the project, the branch and the build, based on the information
-found in the CI context (mostly, the environment variables provided by Jenkins).
+found in the CI context - mostly, the environment variables provided by the CI engine: Jenkins, GitHub Actions or
+Bitbucket Pipelines.
 
 You can of course configure way more, like the promotions and validation stamps at the branch level,
 with some additional configuration for the release branches:
@@ -693,7 +694,10 @@ environment variable), the flags which are _not_ set explicitly are defaulted:
 | `--trigger-data` | `$BITBUCKET_COMMIT` |
 
 Flags set on the command line always take precedence, and nothing is defaulted outside
-of Bitbucket Pipelines.
+of Bitbucket Pipelines. The run time is never guessed: only the caller knows how long the
+run took.
+
+> See [Bitbucket Pipelines](#bitbucket-pipelines) for the pipeline these defaults are meant for.
 
 # Auto-versioning
 
@@ -897,6 +901,206 @@ The [`ontrack-jenkins-cli-pipeline`](https://github.com/nemerosa/ontrack-jenkins
 
 * [`ontrack-github-actions-cli-setup`](https://github.com/nemerosa/ontrack-github-actions-cli-setup) - _installation of the CLI and simplified GitHub/Git setup_
 * [`ontrack-github-actions-cli-validation`](https://github.com/nemerosa/ontrack-github-actions-cli-validation) - _creation of validation runs based on GitHub workflow information_
+
+## Bitbucket Pipelines
+
+There is no Yontrack pipe or app in the Bitbucket marketplace: in Bitbucket Pipelines, the CLI is installed and driven
+directly. Two traits of Pipelines shape how that is done:
+
+* each step runs in its own container, so nothing a step installs, configures or exports survives into the next one;
+* the only thing handed from a step to the next ones is the files it declares as `artifacts`.
+
+So the CLI is installed again in every step which talks to Yontrack, and the build registered at the start of the
+pipeline is carried to the later steps in a file.
+
+> Independently of the pipeline, and only once, associate the Yontrack project with its Bitbucket Cloud repository so
+> that change logs and commit searches work. That is `project set-property bitbucket-cloud`, which needs the workspace
+> slug in `--workspace` - see [Git integration](#git-integration).
+
+### Credentials
+
+Define these [repository or workspace variables](https://support.atlassian.com/bitbucket-cloud/docs/variables-and-secrets/).
+The first two carry credentials and must be marked as _secured_:
+
+| Variable | |
+|---|---|
+| `YONTRACK_URL` | URL of the Yontrack installation, like `https://yontrack.example.com` |
+| `YONTRACK_TOKEN` | A Yontrack API token |
+| `YONTRACK_CLI_VERSION` | The CLI release to install, like `5.4.0`. Not a secret. |
+
+These are the variables the scripts below hand to `config create`; the CLI does not read them itself. The only
+environment variables it reads are `YONTRACK_PROJECT_NAME`, `YONTRACK_BRANCH_NAME`, `YONTRACK_BUILD_NAME` and
+`YONTRACK_BUILD_ID`, all of them produced by `--output env`.
+
+### Installing the CLI
+
+Every step which uses the CLI starts with the same three lines:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | VERSION="$YONTRACK_CLI_VERSION" sh
+yontrack config create prod "$YONTRACK_URL" --token "$YONTRACK_TOKEN"
+```
+
+The [install script](#the-install-script) needs `curl` in the image and installs into `$HOME/.local/bin`, which is why
+the `PATH` is extended first. `VERSION` pins the release: with `YONTRACK_CLI_VERSION` left undefined the script installs
+the latest one, and the pipeline then depends on whatever was published last.
+
+Keep the three lines in a single `- |` block, so that the `export` and the commands which need it are run by the same
+shell. The configuration `config create` writes carries the token - leave it out of the `artifacts` patterns below.
+
+### Registering the build
+
+`ci config` creates the project, the branch and the build from the environment. The Bitbucket variables are passed with
+`--env-all`, which selects every variable carrying a given prefix:
+
+```bash
+yontrack ci config \
+  --env-all BITBUCKET_ \
+  --var version="1.0.$BITBUCKET_BUILD_NUMBER" \
+  --output env > yontrack.env
+```
+
+Yontrack recognises Bitbucket Pipelines and Bitbucket Cloud from those variables on its own, so neither
+`--ci bitbucket-pipelines` nor `--scm bitbucket-cloud` has to be given; the flags are there to force them.
+
+`--var version=...` builds the version from `BITBUCKET_BUILD_NUMBER`, the number Bitbucket increments at each run of the
+pipeline. It is used from `.yontrack/ci.yaml` as:
+
+```yaml
+version: v1
+configuration:
+  build:
+    name: "{{ vars \"version\" }}"
+```
+
+Only the `export` lines go to standard output - `ci config` traces what it reads on standard error - so the redirection
+above captures the identity of the build and nothing else.
+
+> `--env-all` sends every variable carrying the prefix to Yontrack and echoes each of them to the build log. If a step
+> defines a sensitive `BITBUCKET_` variable of its own, list the ones you need with `--env` instead.
+
+### Passing the build between steps
+
+`--output env` wrote the identity of the build into `yontrack.env`:
+
+```text
+export YONTRACK_PROJECT_ID=123
+export YONTRACK_PROJECT_NAME=my-project
+export YONTRACK_BRANCH_ID=456
+export YONTRACK_BRANCH_NAME=main
+export YONTRACK_BUILD_ID=789
+export YONTRACK_BUILD_NAME=1.0.42
+```
+
+Declare that file as an artifact of the step which produced it:
+
+```yaml
+        artifacts:
+          - yontrack.env
+```
+
+Bitbucket then makes it available to every later step, where sourcing it is enough for the other commands to find the
+build without any `--project`, `--branch` or `--build` flag:
+
+```bash
+source yontrack.env
+yontrack validate --validation unit-tests --status PASSED
+```
+
+**This is the route to prefer**: one call to Yontrack for the whole pipeline, and it does not depend on what the build
+carries.
+
+The other route is to look the build up again in each step, from the commit the pipeline runs on:
+
+```bash
+eval "$(yontrack build search --project my-project --commit "$BITBUCKET_COMMIT" --count 1 --output env)"
+```
+
+This prints the very same exports, but it costs a query per step, the project name has to be known by every step, and it
+only finds the build if that build carries the Git commit property - which `build setup --commit "$BITBUCKET_COMMIT"`
+sets. Add `--accept-not-found` if a missing build should not fail the search itself - nothing is then exported, and the
+failure moves to the first command needing `YONTRACK_PROJECT_NAME`.
+
+### Validations
+
+`after-script` runs once the `script` of its step is over, whether it succeeded or not, and Bitbucket sets
+`BITBUCKET_EXIT_CODE` to the exit code of that script. That is where a validation belongs: recorded from `after-script`,
+a failing step gets a `FAILED` validation run instead of being skipped along with the step.
+
+```yaml
+      after-script:
+        - |
+          export PATH="$HOME/.local/bin:$PATH"
+          source yontrack.env
+          if [ "$BITBUCKET_EXIT_CODE" = "0" ]; then
+            yontrack validate --validation unit-tests --status PASSED
+          else
+            yontrack validate --validation unit-tests --status FAILED
+          fi
+```
+
+The `PATH` is extended again because `after-script` runs in a shell of its own; the binary itself is still there,
+installed by the `script` of the same step.
+
+### Run info
+
+Nothing has to be passed for the run info: inside Bitbucket Pipelines the CLI fills in the source type, the pipeline
+URL, the trigger type and the commit on its own - see
+[Run info defaults in Bitbucket Pipelines](#run-info-defaults-in-bitbucket-pipelines) for the exact values. The run time
+is the exception, since only the caller knows it:
+
+```bash
+start=$(date +%s)
+./gradlew test
+yontrack validate --validation unit-tests --status PASSED --run-time $(( $(date +%s) - start ))
+```
+
+Measured in the `script` like this, the duration does not reach the `after-script`, which runs in a shell of its own:
+a step which wants both the duration and `BITBUCKET_EXIT_CODE` writes the start time to a file first.
+
+### A complete `bitbucket-pipelines.yml`
+
+```yaml
+image: atlassian/default-image:4
+
+pipelines:
+  default:
+    - step:
+        name: Yontrack build
+        script:
+          - |
+            export PATH="$HOME/.local/bin:$PATH"
+            curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | VERSION="$YONTRACK_CLI_VERSION" sh
+            yontrack config create prod "$YONTRACK_URL" --token "$YONTRACK_TOKEN"
+            yontrack ci config \
+              --env-all BITBUCKET_ \
+              --var version="1.0.$BITBUCKET_BUILD_NUMBER" \
+              --output env > yontrack.env
+        artifacts:
+          - yontrack.env
+    - step:
+        name: Unit tests
+        script:
+          - |
+            export PATH="$HOME/.local/bin:$PATH"
+            curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | VERSION="$YONTRACK_CLI_VERSION" sh
+            yontrack config create prod "$YONTRACK_URL" --token "$YONTRACK_TOKEN"
+          - ./gradlew test
+        after-script:
+          - |
+            export PATH="$HOME/.local/bin:$PATH"
+            source yontrack.env
+            if [ "$BITBUCKET_EXIT_CODE" = "0" ]; then
+              yontrack validate --validation unit-tests --status PASSED
+            else
+              yontrack validate --validation unit-tests --status FAILED
+            fi
+```
+
+The first step registers the build and publishes `yontrack.env`; the second one runs the tests and records their
+outcome against that build. Any further step follows the same shape: install, configure, `source yontrack.env`, then
+whichever `yontrack` command it needs.
 
 # Contributing
 
