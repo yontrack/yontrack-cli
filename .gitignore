@@ -13,3 +13,7 @@ cmd/.DS_Store
 
 # Environment files
 /*.env
+
+# Claude Code local state
+/.claude/settings.local.json
+/.claude/worktrees/
