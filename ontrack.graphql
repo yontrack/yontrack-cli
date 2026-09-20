@@ -67,7 +67,7 @@ interface ProjectEntity {
 }
 
 "Information about the promotion of a build"
-union BuildPromotionInfoItemData = EnvironmentBuildCount | PromotionLevel | PromotionRun | SlotPipeline
+union BuildPromotionInfoItemData = PromotionLevel | PromotionRun
 
 type Account {
   "List of authorized projects"
@@ -107,6 +107,13 @@ type AddSlotWorkflowPayload implements Payload {
   errors: [UserError]
   "Created slot workflow"
   slotWorkflow: SlotWorkflow
+}
+
+type ApplyDashboardsPayload implements PayloadInterface {
+  "Dashboards that were created or updated"
+  dashboards: [Dashboard!]!
+  "List of errors"
+  errors: [PayloadUserError]
 }
 
 "A named authorization"
@@ -272,6 +279,10 @@ type AutoVersioningOrder {
   uuid: String!
   "Ontrack validation stamp associated with this auto versioning (used for checks)"
   validationStamp: String
+  "Version rule type"
+  versionRule: String
+  "JSON configuration for the version rule"
+  versionRuleConfig: JSON
 }
 
 "Configuration of the auto versioning for one source."
@@ -328,6 +339,10 @@ type AutoVersioningSourceConfig {
   upgradeBranchPattern: String
   "Validation stamp to create on auto versioning (optional)"
   validationStamp: String
+  "ID of the rule checking the version to set against the version already present in the target files. No check is performed when this is not set."
+  versionRule: String
+  "Configuration of the version rule"
+  versionRuleConfig: JSON
   "Source of the version for the build. By default, uses the build label is the source project is configured so, or the build name itself. This allows the customization of this behavior."
   versionSource: String
 }
@@ -404,6 +419,8 @@ type Branch implements Authorizable & ProjectEntity {
     "Fully qualified name of the decoration type"
     type: String
   ): [Decoration!]!
+  "What a build on this branch has to pass through on its way to an environment"
+  deliveryMap: DeliveryMap!
   description: String
   disabled: Boolean!
   "Display name for this branch or the branch's name if not available"
@@ -484,6 +501,8 @@ type Branch implements Authorizable & ProjectEntity {
   ): [ValidationStamp!]!
   "Given a list of validation names, returns for each one the last validation run or null if the validation does not exist."
   validationStatuses(names: [String!]!): [ValidationRun!]!
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 "Information about a branch"
@@ -534,13 +553,15 @@ type Build implements Authorizable & ProjectEntity {
   ): BuildAutoVersioning
   "Reference to branch"
   branch: Branch
+  "Link to the Bitbucket Pipelines run which created this build."
+  buildBitbucketPipelineRunProperty: Property
   "Link to the GitHub Workflow Run which created this build."
   buildGitHubWorkflowRunProperty: Property
   creation: Signature
   "Gets the list of slots where this build is actually deployed"
   currentDeployments(
-    "Qualifier to use"
-    qualifier: String = ""
+    "Qualifier to filter on. Any qualifier if not provided."
+    qualifier: String
   ): [SlotPipeline!]!
   "List of decorations"
   decorations(
@@ -678,6 +699,8 @@ type Build implements Authorizable & ProjectEntity {
     "List of validation stamps"
     validationStamps: [String!]
   ): [Validation!]!
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 "Gathering information about the auto versioning around this build"
@@ -1021,6 +1044,14 @@ type CreateJenkinsConfigurationPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the createLabel mutation."
+type CreateLabelPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Created label"
+  label: Label
+}
+
 "Output type for the createPredefinedPromotionLevel mutation."
 type CreatePredefinedPromotionLevelPayload implements Payload {
   "List of errors"
@@ -1142,6 +1173,8 @@ type CreateWebhookPayload implements Payload {
 }
 
 type Dashboard {
+  "Exports this dashboard as a YAML snippet ready to use with applyDashboards"
+  asYaml: String!
   authorizations: DashboardAuthorizations!
   name: String!
   userScope: DashboardContextUserScope!
@@ -1250,6 +1283,22 @@ type DeleteBranchReleaseValidationPropertyByIdPayload implements Payload {
 type DeleteBranchReleaseValidationPropertyPayload implements Payload {
   "Branch updated"
   branch: Branch
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteBuildBitbucketPipelineRunPropertyById mutation."
+type DeleteBuildBitbucketPipelineRunPropertyByIdPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteBuildBitbucketPipelineRunProperty mutation."
+type DeleteBuildBitbucketPipelineRunPropertyPayload implements Payload {
+  "Build updated"
+  build: Build
   "List of errors"
   errors: [UserError]
 }
@@ -1374,6 +1423,12 @@ type DeleteGlobalRoleFromAccountPayload implements Payload {
 
 "Output type for the deleteJenkinsConfiguration mutation."
 type DeleteJenkinsConfigurationPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteLabel mutation."
+type DeleteLabelPayload implements Payload {
   "List of errors"
   errors: [UserError]
 }
@@ -1797,6 +1852,58 @@ type DeletionPayload implements PayloadInterface {
   errors: [PayloadUserError]
 }
 
+"What a build on a branch has to pass through on its way to an environment"
+type DeliveryMap {
+  "Nodes of the map"
+  checkpoints: [DeliveryMapCheckpoint!]!
+  "Dependencies between the checkpoints"
+  edges: [DeliveryMapEdge!]!
+  "The branch's latest build, which every checkpoint's lag is counted against"
+  head: Build
+}
+
+"Latest build to have arrived at a checkpoint, and what became of it there"
+type DeliveryMapArrival {
+  "Latest build to have arrived at this checkpoint"
+  build: Build!
+  "Builds of the branch more recent than this one, null when it cannot be counted"
+  lag: Int
+  "What became of the build here, null when arriving is the whole outcome"
+  status: ValidationRunStatusID
+  "When the build arrived"
+  time: LocalDateTime!
+}
+
+"One node of a delivery map"
+type DeliveryMapCheckpoint {
+  "Latest build to have arrived at this checkpoint, and what became of it there"
+  arrival: DeliveryMapArrival
+  "Kind-specific payload, read by the renderer selected by the type"
+  data: JSON
+  "Description of the checkpoint"
+  description: String
+  "Identifier, stable across fetches and unique across kinds"
+  id: String!
+  "Checkpoints an aggregate checkpoint stands for, empty for every other kind"
+  members: [DeliveryMapCheckpoint!]!
+  "Label of the checkpoint"
+  name: String!
+  "Kind of checkpoint, selecting how it is rendered"
+  type: String!
+}
+
+"A dependency between two checkpoints of a delivery map"
+type DeliveryMapEdge {
+  "Identifier, stable across fetches"
+  id: String!
+  "What the dependency means"
+  kind: DeliveryMapEdgeKind!
+  "ID of the checkpoint the dependency runs from"
+  source: String!
+  "ID of the checkpoint the dependency runs to"
+  target: String!
+}
+
 "Output type for the disableBranch mutation."
 type DisableBranchPayload implements Payload {
   "Updated branch"
@@ -1837,6 +1944,8 @@ type EditAccountPayload implements Payload {
 type EligibleSlot {
   "eligible field"
   eligible: Boolean
+  "Admission rules of the slot which refuse this build. Empty when the build is eligible."
+  nonEligibleRules: [SlotAdmissionRuleConfig!]!
   "slot field"
   slot: Slot!
 }
@@ -1867,8 +1976,20 @@ type EnableSubscriptionPayload implements Payload {
 
 "Representation of the entity counts"
 type EntityCounts {
+  "Number of branches"
+  branches: Int!
+  "Number of builds"
+  builds: Int!
   "Number of projects"
   projects: Int!
+  "Number of promotion levels"
+  promotionLevels: Int!
+  "Number of promotion runs"
+  promotionRuns: Int!
+  "Number of validation runs"
+  validationRuns: Int!
+  "Number of validation stamps"
+  validationStamps: Int!
 }
 
 "Extra information component about an entity"
@@ -1900,16 +2021,6 @@ type Environment {
   ): [Slot!]!
   "tags field"
   tags: [String!]!
-}
-
-"Number of environments where a build is deployed"
-type EnvironmentBuildCount {
-  "Associated build"
-  build: Build!
-  "Number of environments where a build is deployed"
-  count: Int
-  "ID of the count (build ID)"
-  id: ID!
 }
 
 "EventSubscriptionPayload"
@@ -3022,8 +3133,6 @@ type Label {
   category: String
   "color field"
   color: String!
-  "computedBy field"
-  computedBy: LabelProviderDescription
   "description field"
   description: String
   "foregroundColor field"
@@ -3032,16 +3141,10 @@ type Label {
   id: Int!
   "name field"
   name: String!
+  "Number of projects carrying this label, among the ones which are visible to the current user"
+  projectCount: Int!
   "List of associated projects"
   projects: [Project!]!
-}
-
-"LabelProviderDescription"
-type LabelProviderDescription {
-  "id field"
-  id: String!
-  "name field"
-  name: String!
 }
 
 "Output type for the launchWorkflow mutation."
@@ -3146,12 +3249,34 @@ type Message {
   type: MessageType!
 }
 
+"Output type for the mockScmDeleteRepository mutation."
+type MockScmDeleteRepositoryPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the mockScmRegisterCommit mutation."
+type MockScmRegisterCommitPayload implements Payload {
+  "The registered commit"
+  commit: SCMCommit
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the mockScmRegisterIssue mutation."
+type MockScmRegisterIssuePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
 type Mutation {
   "Add a workflow into an existing slot"
   addSlotWorkflow(
     "Input for the mutation"
     input: AddSlotWorkflowInput
   ): AddSlotWorkflowPayload
+  "Applies a YAML list of dashboard definitions, creating or updating SHARED dashboards"
+  applyDashboards(input: ApplyDashboardsInput!): ApplyDashboardsPayload!
   "Bulk update of a promotion level"
   bulkUpdatePromotionLevelById(
     "Input for the mutation"
@@ -3239,6 +3364,11 @@ type Mutation {
     "Input for the mutation"
     input: CreateJenkinsConfigurationInput
   ): CreateJenkinsConfigurationPayload
+  "Creates a new label"
+  createLabel(
+    "Input for the mutation"
+    input: CreateLabelInput
+  ): CreateLabelPayload
   "Creates a new predefined promotion level"
   createPredefinedPromotionLevel(
     "Input for the mutation"
@@ -3374,6 +3504,16 @@ type Mutation {
     "Input for the mutation"
     input: DeleteBranchReleaseValidationPropertyByIdInput
   ): DeleteBranchReleaseValidationPropertyByIdPayload
+  "Deletes the bitbucket Pipelines run property on a build identified by name."
+  deleteBuildBitbucketPipelineRunProperty(
+    "Input for the mutation"
+    input: DeleteBuildBitbucketPipelineRunPropertyInput
+  ): DeleteBuildBitbucketPipelineRunPropertyPayload
+  "Deletes the bitbucket Pipelines run property on a build."
+  deleteBuildBitbucketPipelineRunPropertyById(
+    "Input for the mutation"
+    input: DeleteBuildBitbucketPipelineRunPropertyByIdInput
+  ): DeleteBuildBitbucketPipelineRunPropertyByIdPayload
   "Deletes a build by ID"
   deleteBuildById(
     "Input for the mutation"
@@ -3468,6 +3608,11 @@ type Mutation {
   ): DeleteJenkinsConfigurationPayload
   "Deletes a job"
   deleteJob(id: Int!): JobActionResult!
+  "Deletes an existing label"
+  deleteLabel(
+    "Input for the mutation"
+    input: DeleteLabelInput
+  ): DeleteLabelPayload
   "Deleting notification records"
   deleteNotificationRecords(
     "Input for the mutation"
@@ -3885,6 +4030,21 @@ type Mutation {
     "Input for the mutation"
     input: MapGroupInput
   ): MapGroupPayload
+  "Deletes a mock SCM repository and everything it holds. The mock SCM keeps its repositories on the bean, where they outlive the entities pointing at them, and derives a commit id from the position of the commit on its branch ? so anything registering the same commits twice starts here."
+  mockScmDeleteRepository(
+    "Input for the mutation"
+    input: MockScmDeleteRepositoryInput
+  ): MockScmDeleteRepositoryPayload
+  "Registers a commit in a mock SCM repository, creating the repository and the branch if they are not there yet."
+  mockScmRegisterCommit(
+    "Input for the mutation"
+    input: MockScmRegisterCommitInput
+  ): MockScmRegisterCommitPayload
+  "Registers an issue in a mock SCM repository's issue service. Issues must be registered before the commits mentioning them: the mock SCM links a commit to an issue as the commit comes in."
+  mockScmRegisterIssue(
+    "Input for the mutation"
+    input: MockScmRegisterIssueInput
+  ): MockScmRegisterIssuePayload
   "Overriding a rule into a pipeline"
   overridePipelineRule(
     "Input for the mutation"
@@ -4056,6 +4216,16 @@ type Mutation {
     "Input for the mutation"
     input: SetBranchReleaseValidationPropertyByIdInput
   ): SetBranchReleaseValidationPropertyByIdPayload
+  "Set the bitbucket Pipelines run property on a build identified by name."
+  setBuildBitbucketPipelineRunProperty(
+    "Input for the mutation"
+    input: SetBuildBitbucketPipelineRunPropertyInput
+  ): SetBuildBitbucketPipelineRunPropertyPayload
+  "Set the bitbucket Pipelines run property on a build."
+  setBuildBitbucketPipelineRunPropertyById(
+    "Input for the mutation"
+    input: SetBuildBitbucketPipelineRunPropertyByIdInput
+  ): SetBuildBitbucketPipelineRunPropertyByIdPayload
   "Set the git commit property on a build identified by name."
   setBuildGitCommitProperty(
     "Input for the mutation"
@@ -4196,6 +4366,11 @@ type Mutation {
     "Input for the mutation"
     input: SetProjectGitLabConfigurationPropertyByIdInput
   ): SetProjectGitLabConfigurationPropertyByIdPayload
+  "Sets the labels of a project, replacing all the existing ones"
+  setProjectLabels(
+    "Input for the mutation"
+    input: SetProjectLabelsInput
+  ): SetProjectLabelsPayload
   "Set the message property on a project identified by name."
   setProjectMessageProperty(
     "Input for the mutation"
@@ -4391,6 +4566,11 @@ type Mutation {
     "Input for the mutation"
     input: SetupMetricsValidationStampInput
   ): SetupMetricsValidationStampPayload
+  "Creates or updates a Number validation stamp"
+  setupNumberValidationStamp(
+    "Input for the mutation"
+    input: SetupNumberValidationStampInput
+  ): SetupNumberValidationStampPayload
   "Creates or updates a Percentage validation stamp"
   setupPercentageValidationStamp(
     "Input for the mutation"
@@ -4525,6 +4705,11 @@ type Mutation {
     "Input for the mutation"
     input: UpdateJenkinsConfigurationInput
   ): UpdateJenkinsConfigurationPayload
+  "Updates an existing label"
+  updateLabel(
+    "Input for the mutation"
+    input: UpdateLabelInput
+  ): UpdateLabelPayload
   "Updating the pipeline admission data"
   updatePipelineData(
     "Input for the mutation"
@@ -4575,6 +4760,11 @@ type Mutation {
     "Input for the mutation"
     input: ValidateBuildByIdWithMetricsInput
   ): ValidateBuildByIdWithMetricsPayload
+  "Validates a build identified by id with Number data"
+  validateBuildByIdWithNumber(
+    "Input for the mutation"
+    input: ValidateBuildByIdWithNumberInput
+  ): ValidateBuildByIdWithNumberPayload
   "Validates a build identified by id with Percentage data"
   validateBuildByIdWithPercentage(
     "Input for the mutation"
@@ -4595,6 +4785,11 @@ type Mutation {
     "Input for the mutation"
     input: ValidateBuildWithMetricsInput
   ): ValidateBuildWithMetricsPayload
+  "Validates a build identified by name with Number data"
+  validateBuildWithNumber(
+    "Input for the mutation"
+    input: ValidateBuildWithNumberInput
+  ): ValidateBuildWithNumberPayload
   "Validates a build identified by name with Percentage data"
   validateBuildWithPercentage(
     "Input for the mutation"
@@ -4775,10 +4970,22 @@ type Preferences {
   branchViewVsGroups: Boolean!
   "Branch view VS names"
   branchViewVsNames: Boolean!
+  "Commits shown beside the semantic change log"
+  changeLogSemanticCommits: Boolean!
+  "Emojis in the section titles of the semantic change log"
+  changeLogSemanticEmojis: Boolean!
+  "Renderer used by the semantic change log view"
+  changeLogSemanticFormat: String!
+  "Issues section inside the rendered semantic change log"
+  changeLogSemanticIssues: Boolean!
   "Dashboard selected by default"
   dashboardUuid: String
   "Selected branch view"
   selectedBranchViewKey: String
+  "Selected change log view"
+  selectedChangeLogViewKey: String
+  "Theme selected for the web UI"
+  themeMode: ThemeMode!
 }
 
 type Project implements Authorizable & ProjectEntity {
@@ -4920,6 +5127,8 @@ type Project implements Authorizable & ProjectEntity {
     "Validation stamp where to look for validation runs (regular expression, defaults to all)"
     validationStamp: String
   ): ValidationRunPaginated
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 type ProjectAuthorization {
@@ -5148,6 +5357,8 @@ type PromotionLevel implements Authorizable & ProjectEntity {
   name: String
   "Makes a promotion conditional based on the fact that a previous promotion has been granted."
   previousPromotionConditionProperty: Property
+  "Number of distinct builds which have been promoted to this level"
+  promotedBuildCount: Int!
   "List of promotions a promotion depends on before being applied."
   promotionDependenciesProperty: Property
   "List of runs for this promotion"
@@ -5181,6 +5392,8 @@ type PromotionLevel implements Authorizable & ProjectEntity {
   ): [Property!]!
   "List of actions available for this entity"
   userMenuActions: [UserMenuAction!]!
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 "Configurable field definition on a promotion level"
@@ -5252,6 +5465,8 @@ type PromotionRun implements Authorizable & ProjectEntity {
   ): [Property!]!
   "List of actions available for this entity"
   userMenuActions: [UserMenuAction!]!
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 "A field value stored on a promotion run"
@@ -5590,6 +5805,11 @@ type Query {
   ): JobStatusPaginated
   "Gets the JSON schema definitions"
   jsonSchemaDefinitions: [JsonSchemaDefinition!]!
+  "Label using its ID, null when there is no such label"
+  label(
+    "ID of the label to look for"
+    id: Int!
+  ): Label
   "List of all labels"
   labels(
     "Category to look for"
@@ -5639,6 +5859,8 @@ type Query {
   notificationSettings: NotificationSettings
   "Paginated list of projects"
   paginatedProjects(
+    "Labels the projects must all carry, as `category:name` display strings (just `name` for a label without a category), like the `labels` argument of `projects`. Combined with `name` by AND, and so are the labels between themselves."
+    labels: [String!],
     "Fragment of the project name to filter on"
     name: String,
     "Offset for the page"
@@ -5790,6 +6012,25 @@ type Query {
     projects: [String!],
     "ID of the build to"
     to: Int!
+  ): SCMChangeLog
+  "Query to get a change log between two builds, using their names or display names."
+  scmChangeLogByName(
+    "Name or display name of the build from"
+    from: String!,
+    "Name of the branch of the build from, used to disambiguate its name"
+    fromBranch: String,
+    "Name of the project"
+    project: String!,
+    """
+    List of projects to follow one by one for a get deep change log. Each item
+    in the list is either a project name, or a project name and qualifier separated
+    by a colon (:).
+    """
+    projects: [String!],
+    "Name or display name of the build to"
+    to: String!,
+    "Name of the branch of the build to, used to disambiguate its name"
+    toBranch: String
   ): SCMChangeLog
   "Performs a search in Ontrack"
   search(
@@ -6228,7 +6469,10 @@ type SCMCommitInfo {
 "SCMDecoratedCommit"
 type SCMDecoratedCommit {
   "Annotated message with links"
-  annotatedMessage: String!
+  annotatedMessage(
+    "Maximum length of the message, ellipsis included. Only the first line of the commit message is returned; set this to 0 to get the whole message."
+    maxLength: Int = 100
+  ): String!
   "Any build linked to this commit"
   build: Build
   "commit field"
@@ -6507,6 +6751,22 @@ type SetBranchReleaseValidationPropertyPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the setBuildBitbucketPipelineRunPropertyById mutation."
+type SetBuildBitbucketPipelineRunPropertyByIdPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the setBuildBitbucketPipelineRunProperty mutation."
+type SetBuildBitbucketPipelineRunPropertyPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
 "Output type for the setBuildGitCommitPropertyById mutation."
 type SetBuildGitCommitPropertyByIdPayload implements Payload {
   "Build updated"
@@ -6728,6 +6988,14 @@ type SetProjectGitLabConfigurationPropertyPayload implements Payload {
   "List of errors"
   errors: [UserError]
   "Project updated"
+  project: Project
+}
+
+"Output type for the setProjectLabels mutation."
+type SetProjectLabelsPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Updated project"
   project: Project
 }
 
@@ -7056,6 +7324,14 @@ type SetupCHMLValidationStampPayload implements Payload {
 
 "Output type for the setupMetricsValidationStamp mutation."
 type SetupMetricsValidationStampPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Created or updated validation stamp"
+  validationStamp: ValidationStamp
+}
+
+"Output type for the setupNumberValidationStamp mutation."
+type SetupNumberValidationStampPayload implements Payload {
   "List of errors"
   errors: [UserError]
   "Created or updated validation stamp"
@@ -7603,6 +7879,14 @@ type UpdateJenkinsConfigurationPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the updateLabel mutation."
+type UpdateLabelPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Updated label"
+  label: Label
+}
+
 "Output type for the updatePipelineData mutation."
 type UpdatePipelineDataPayload implements Payload {
   "List of errors"
@@ -7727,6 +8011,14 @@ type ValidateBuildByIdWithMetricsPayload implements Payload {
   validationRun: ValidationRun
 }
 
+"Output type for the validateBuildByIdWithNumber mutation."
+type ValidateBuildByIdWithNumberPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Created validation run"
+  validationRun: ValidationRun
+}
+
 "Output type for the validateBuildByIdWithPercentage mutation."
 type ValidateBuildByIdWithPercentagePayload implements Payload {
   "List of errors"
@@ -7753,6 +8045,14 @@ type ValidateBuildWithCHMLPayload implements Payload {
 
 "Output type for the validateBuildWithMetrics mutation."
 type ValidateBuildWithMetricsPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Created validation run"
+  validationRun: ValidationRun
+}
+
+"Output type for the validateBuildWithNumber mutation."
+type ValidateBuildWithNumberPayload implements Payload {
   "List of errors"
   errors: [UserError]
   "Created validation run"
@@ -7871,6 +8171,8 @@ type ValidationRun implements Authorizable & ProjectEntity {
   ): [ValidationRunStatus!]!
   "Associated validation stamp"
   validationStamp: ValidationStamp!
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 "Data associated with a validation run"
@@ -7975,6 +8277,8 @@ type ValidationStamp implements Authorizable & ProjectEntity {
     "Size of the page"
     size: Int = 20
   ): ValidationRunPaginated
+  "Workflows which have been launched by a notification on an event for this entity, most recent first. Resolved by scanning the 100 most recent workflow notification records for this entity, so the list may be truncated on entities which accumulate many of them, like a project or a branch."
+  workflowInstances: [WorkflowInstance!]!
 }
 
 "Validation stamp filter"
@@ -8258,6 +8562,7 @@ enum AutoVersioningNotificationScope {
   ALL
   ERROR
   PR_TIMEOUT
+  REJECTED
   SUCCESS
 }
 
@@ -8305,6 +8610,13 @@ enum DashboardContextUserScope {
   BUILT_IN
   PRIVATE
   SHARED
+}
+
+"What an edge of a delivery map means"
+enum DeliveryMapEdgeKind {
+  EMITS
+  REQUIRES
+  UNLOCKS
 }
 
 "State a hook request can be in"
@@ -8455,6 +8767,13 @@ enum SlotPipelineStatus {
   RUNNING
 }
 
+"Theme selected by a user for the web UI"
+enum ThemeMode {
+  DARK
+  LIGHT
+  SYSTEM
+}
+
 "Defines how validation runs should be sorted"
 enum ValidationRunSortingMode {
   ID
@@ -8509,6 +8828,11 @@ input AddSlotWorkflowInput {
   trigger: SlotPipelineStatus!
   "workflowYaml field"
   workflowYaml: String!
+}
+
+input ApplyDashboardsInput {
+  "YAML list of dashboard definitions"
+  yaml: String!
 }
 
 "Filter when querying auto versioning processing orders"
@@ -8597,6 +8921,10 @@ input AutoVersioningSourceConfigInput {
   upgradeBranchPattern: String
   "Validation stamp to create on auto versioning (optional)"
   validationStamp: String
+  "ID of the rule checking the version to set against the version already present in the target files. No check is performed when this is not set."
+  versionRule: String
+  "Configuration of the version rule"
+  versionRuleConfig: JSON
   "Source of the version for the build. By default, uses the build label is the source project is configured so, or the build name itself. This allows the customization of this behavior."
   versionSource: String
 }
@@ -8696,6 +9024,8 @@ input CancelSlotPipelineInput {
 input ChangeLogTemplatingServiceConfig {
   "Loop over all qualifiers for the last level of `dependencies`, including the default one. Qualifiers at `dependencies` take precedence."
   allQualifiers: Boolean
+  "Maximum length of a commit message in a change log, ellipsis included. Only the first line of a commit message is ever rendered; set this to 0 to render that line in full."
+  commitsMaxLength: Int
   "Defines how to render commits for a change log"
   commitsOption: ChangeLogTemplatingCommitsOption
   "If a qualifier has no previous link, uses the default qualifier (empty) qualifier."
@@ -8888,6 +9218,18 @@ input CreateJenkinsConfigurationInput {
   user: String
 }
 
+"Input type for the createLabel mutation."
+input CreateLabelInput {
+  "Category of the label, optional"
+  category: String
+  "Color of the label, in the #RRGGBB format"
+  color: String!
+  "Description of the label"
+  description: String
+  "Name of the label"
+  name: String!
+}
+
 "Input type for the createPredefinedPromotionLevel mutation."
 input CreatePredefinedPromotionLevelInput {
   "Description for the predefined promotion level"
@@ -9002,6 +9344,8 @@ input CreateValidationRunByIdInput {
   data: JSON
   "Type of the data to associated with the validation"
   dataTypeId: String
+  "Validation run date/time"
+  dateTime: LocalDateTime
   "Validation description"
   description: String
   "Run info"
@@ -9020,6 +9364,8 @@ input CreateValidationRunByReleaseInput {
   data: JSON
   "Type of the data to associated with the validation"
   dataTypeId: String
+  "Validation run date/time"
+  dateTime: LocalDateTime
   "Validation description"
   description: String
   "Project name"
@@ -9042,6 +9388,8 @@ input CreateValidationRunInput {
   data: JSON
   "Type of the data to associated with the validation"
   dataTypeId: String
+  "Validation run date/time"
+  dateTime: LocalDateTime
   "Validation description"
   description: String
   "Project name"
@@ -9166,6 +9514,22 @@ input DeleteBranchReleaseValidationPropertyByIdInput {
 input DeleteBranchReleaseValidationPropertyInput {
   "Branch name"
   branch: String!
+  "Project name"
+  project: String!
+}
+
+"Input type for the deleteBuildBitbucketPipelineRunPropertyById mutation."
+input DeleteBuildBitbucketPipelineRunPropertyByIdInput {
+  "ID of the build"
+  id: Int!
+}
+
+"Input type for the deleteBuildBitbucketPipelineRunProperty mutation."
+input DeleteBuildBitbucketPipelineRunPropertyInput {
+  "Branch name"
+  branch: String!
+  "Build name"
+  build: String!
   "Project name"
   project: String!
 }
@@ -9309,6 +9673,12 @@ input DeleteGlobalRoleFromAccountInput {
 input DeleteJenkinsConfigurationInput {
   "name field"
   name: String!
+}
+
+"Input type for the deleteLabel mutation."
+input DeleteLabelInput {
+  "ID of the label to delete"
+  id: Int!
 }
 
 "Input type for the deleteNotificationRecords mutation."
@@ -10130,6 +10500,34 @@ input MetricsEntryInput {
   value: Float!
 }
 
+"Input type for the mockScmDeleteRepository mutation."
+input MockScmDeleteRepositoryInput {
+  "Name of the mock SCM repository"
+  repository: String!
+}
+
+"Input type for the mockScmRegisterCommit mutation."
+input MockScmRegisterCommitInput {
+  "Commit message"
+  message: String!
+  "Name of the mock SCM repository"
+  repository: String!
+  "Branch of the repository the commit goes on"
+  scmBranch: String!
+}
+
+"Input type for the mockScmRegisterIssue mutation."
+input MockScmRegisterIssueInput {
+  "Issue key, of the `ABC-123` shape the mock issue service reads out of a commit message"
+  key: String!
+  "Issue summary"
+  message: String!
+  "Name of the mock SCM repository"
+  repository: String!
+  "Issue type, which is what a change log groups its issues by"
+  type: String
+}
+
 "Input type for the overridePipelineRule mutation."
 input OverridePipelineRuleInput {
   "admissionRuleConfigId field"
@@ -10414,6 +10812,8 @@ input SelectDashboardInput {
 input SemanticChangeLogTemplatingServiceConfig {
   "Loop over all qualifiers for the last level of `dependencies`, including the default one. Qualifiers at `dependencies` take precedence."
   allQualifiers: Boolean
+  "Maximum length of a commit message in a change log, ellipsis included. Only the first line of a commit message is ever rendered; set this to 0 to render that line in full."
+  commitsMaxLength: Int
   "If a qualifier has no previous link, uses the default qualifier (empty) qualifier."
   defaultQualifierFallback: Boolean
   "Comma-separated list of project links to follow one by one for a get deep change log. Each item in the list is either a project name, or a project name and qualifier separated by a colon (:)."
@@ -10556,6 +10956,38 @@ input SetBranchReleaseValidationPropertyInput {
   validation: String!
 }
 
+"Input type for the setBuildBitbucketPipelineRunPropertyById mutation."
+input SetBuildBitbucketPipelineRunPropertyByIdInput {
+  "Number of the pipeline run"
+  buildNumber: Int!
+  "ID of the build"
+  id: Int!
+  "Slug of the repository in the workspace"
+  repository: String!
+  "UUID of the pipeline run"
+  uuid: String
+  "Slug of the Bitbucket Cloud workspace"
+  workspace: String!
+}
+
+"Input type for the setBuildBitbucketPipelineRunProperty mutation."
+input SetBuildBitbucketPipelineRunPropertyInput {
+  "Branch name"
+  branch: String!
+  "Build name"
+  build: String!
+  "Number of the pipeline run"
+  buildNumber: Int!
+  "Project name"
+  project: String!
+  "Slug of the repository in the workspace"
+  repository: String!
+  "UUID of the pipeline run"
+  uuid: String
+  "Slug of the Bitbucket Cloud workspace"
+  workspace: String!
+}
+
 "Input type for the setBuildGitCommitPropertyById mutation."
 input SetBuildGitCommitPropertyByIdInput {
   "Full commit hash"
@@ -10686,10 +11118,22 @@ input SetPreferencesInput {
   branchViewVsGroups: Boolean
   "branchViewVsNames field"
   branchViewVsNames: Boolean
+  "Commits shown beside the semantic change log"
+  changeLogSemanticCommits: Boolean
+  "Emojis in the section titles of the semantic change log"
+  changeLogSemanticEmojis: Boolean
+  "Renderer used by the semantic change log view"
+  changeLogSemanticFormat: String
+  "Issues section inside the rendered semantic change log"
+  changeLogSemanticIssues: Boolean
   "Dashboard selected by default"
   dashboardUuid: String
   "Selected branch view"
   selectedBranchViewKey: String
+  "Selected change log view"
+  selectedChangeLogViewKey: String
+  "Theme selected for the web UI"
+  themeMode: ThemeMode
 }
 
 "Input type for the setProjectAutoPromotionLevelPropertyById mutation."
@@ -10762,8 +11206,10 @@ input SetProjectBitbucketCloudConfigurationPropertyByIdInput {
   indexationInterval: Int
   "Issue identifier to use, for example jira//name where name is the name of the JIRA configuration in Ontrack."
   issueServiceConfigurationIdentifier: String
-  "Bitbucket Cloud repository to use, in the form of `workspace/name`"
+  "Slug of the Bitbucket Cloud repository in the workspace"
   repository: String!
+  "Slug of the Bitbucket Cloud workspace"
+  workspace: String!
 }
 
 "Input type for the setProjectBitbucketCloudConfigurationProperty mutation."
@@ -10776,8 +11222,10 @@ input SetProjectBitbucketCloudConfigurationPropertyInput {
   issueServiceConfigurationIdentifier: String
   "Project name"
   project: String!
-  "Bitbucket Cloud repository to use, in the form of `workspace/name`"
+  "Slug of the Bitbucket Cloud repository in the workspace"
   repository: String!
+  "Slug of the Bitbucket Cloud workspace"
+  workspace: String!
 }
 
 "Input type for the setProjectBitbucketConfigurationPropertyById mutation."
@@ -10882,6 +11330,14 @@ input SetProjectGitLabConfigurationPropertyInput {
   project: String!
   "GitLab repository to use, in the form of `project/name`"
   repository: String!
+}
+
+"Input type for the setProjectLabels mutation."
+input SetProjectLabelsInput {
+  "IDs of the labels to set on the project. Any other label is removed from the project."
+  labelIds: [Int!]!
+  "ID of the project"
+  projectId: Int!
 }
 
 "Input type for the setProjectMessagePropertyById mutation."
@@ -11022,6 +11478,8 @@ input SetProjectStalePropertyInput {
 
 "Input type for the setPromotionLevelAutoPromotionPropertyById mutation."
 input SetPromotionLevelAutoPromotionPropertyByIdInput {
+  "When enabled, the promotion is revoked as soon as one of its prerequisites - a required validation stamp or a required promotion - is no longer valid. Revoking a promotion deletes it, but does not undo its effects: any notification or workflow already triggered by the promotion remains fired. Defaults to false when absent."
+  autoRevoke: Boolean
   "Regular expression to exclude validation stamps by name"
   exclude: String
   "ID of the promotion level"
@@ -11036,6 +11494,8 @@ input SetPromotionLevelAutoPromotionPropertyByIdInput {
 
 "Input type for the setPromotionLevelAutoPromotionProperty mutation."
 input SetPromotionLevelAutoPromotionPropertyInput {
+  "When enabled, the promotion is revoked as soon as one of its prerequisites - a required validation stamp or a required promotion - is no longer valid. Revoking a promotion deletes it, but does not undo its effects: any notification or workflow already triggered by the promotion remains fired. Defaults to false when absent."
+  autoRevoke: Boolean
   "Branch name"
   branch: String!
   "Regular expression to exclude validation stamps by name"
@@ -11394,6 +11854,24 @@ input SetupMetricsValidationStampInput {
   validation: String!
 }
 
+"Input type for the setupNumberValidationStamp mutation."
+input SetupNumberValidationStampInput {
+  "Name of the branch"
+  branch: String!
+  "Description of the validation stamp"
+  description: String
+  "Threshold value for a failure"
+  failureThreshold: Int
+  "Direction of the value scale"
+  okIfGreater: Boolean
+  "Name of the project"
+  project: String!
+  "Name of the validation stamp"
+  validation: String!
+  "Threshold value for a warning"
+  warningThreshold: Int
+}
+
 "Input type for the setupPercentageValidationStamp mutation."
 input SetupPercentageValidationStampInput {
   "Name of the branch"
@@ -11521,6 +11999,11 @@ input StandardBuildFilter {
   sinceValidationStamp: String
   "... with status"
   sinceValidationStampStatus: String
+  """
+  The build display name (its release label when set, its name otherwise) must match this regular expression.
+  The matching is case insensitive and partial - use ^ and $ to anchor the pattern.
+  """
+  withDisplayName: String
   "Builds with this promotion level"
   withPromotionLevel: String
   "With property"
@@ -11813,6 +12296,20 @@ input UpdateJenkinsConfigurationInput {
   user: String
 }
 
+"Input type for the updateLabel mutation."
+input UpdateLabelInput {
+  "Category of the label, optional"
+  category: String
+  "Color of the label, in the #RRGGBB format"
+  color: String!
+  "Description of the label"
+  description: String
+  "ID of the label to update"
+  id: Int!
+  "Name of the label"
+  name: String!
+}
+
 "Input type for the updatePipelineData mutation."
 input UpdatePipelineDataInput {
   "pipelineId field"
@@ -11943,6 +12440,22 @@ input ValidateBuildByIdWithMetricsInput {
   validation: String!
 }
 
+"Input type for the validateBuildByIdWithNumber mutation."
+input ValidateBuildByIdWithNumberInput {
+  "Description of the validation run"
+  description: String
+  "ID of the build"
+  id: Int!
+  "Optional run info to associated with this validation run"
+  runInfo: RunInfoInput
+  "Status of the validation run"
+  status: String
+  "Name of the validation stamp"
+  validation: String!
+  "Number"
+  value: Int!
+}
+
 "Input type for the validateBuildByIdWithPercentage mutation."
 input ValidateBuildByIdWithPercentageInput {
   "Description of the validation run"
@@ -12023,6 +12536,26 @@ input ValidateBuildWithMetricsInput {
   status: String
   "Name of the validation stamp"
   validation: String!
+}
+
+"Input type for the validateBuildWithNumber mutation."
+input ValidateBuildWithNumberInput {
+  "Name of the branch"
+  branch: String!
+  "Name of the build"
+  build: String!
+  "Description of the validation run"
+  description: String
+  "Name of the project"
+  project: String!
+  "Optional run info to associated with this validation run"
+  runInfo: RunInfoInput
+  "Status of the validation run"
+  status: String
+  "Name of the validation stamp"
+  validation: String!
+  "Number"
+  value: Int!
 }
 
 "Input type for the validateBuildWithPercentage mutation."
