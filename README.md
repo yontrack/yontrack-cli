@@ -184,8 +184,8 @@ configuration: { }
 ```
 
 When using this configuration, Yontrack will create the project, the branch and the build, based on the information
-found in the CI context - mostly, the environment variables provided by the CI engine: Jenkins, GitHub Actions or
-Bitbucket Pipelines.
+found in the CI context - mostly, the environment variables provided by the CI engine: Jenkins, GitHub Actions,
+Bitbucket Pipelines or GitLab CI.
 
 You can of course configure way more, like the promotions and validation stamps at the branch level,
 with some additional configuration for the release branches:
@@ -731,6 +731,8 @@ Detected using the `GITLAB_CI` environment variable, which GitLab sets to `true`
 | `--trigger-type` | `commit` |
 | `--trigger-data` | `$CI_COMMIT_SHA` |
 
+> See [GitLab CI](#gitlab-ci) for the pipeline these defaults are meant for.
+
 # Auto-versioning
 
 The Yontrack CLI can be used to set up the auto-versioning configuration for a branch.
@@ -1133,6 +1135,256 @@ pipelines:
 The first step registers the build and publishes `yontrack.env`; the second one runs the tests and records their
 outcome against that build. Any further step follows the same shape: install, configure, `source yontrack.env`, then
 whichever `yontrack` command it needs.
+
+## GitLab CI
+
+There is no Yontrack component in the GitLab CI/CD catalog: in GitLab CI, the CLI is installed and driven directly.
+Two traits of GitLab CI shape how that is done:
+
+* each job runs on its own runner, in a container of its own, so nothing a job installs, configures or exports
+  survives into the next one;
+* what a job hands to the later ones is what it declares under `artifacts` - files, given as `paths`, or variables,
+  given as a `dotenv` report.
+
+So the CLI is installed again in every job which talks to Yontrack, and the build registered at the start of the
+pipeline is carried to the later jobs in a file.
+
+> Independently of the pipeline, and only once, associate the Yontrack project with its GitLab project so that change
+> logs and commit searches work. That is `project set-property gitlab`, whose `--repository` is the full project path,
+> as deep as the subgroups go - see [Git integration](#git-integration).
+
+### Credentials
+
+Define these [CI/CD variables](https://docs.gitlab.com/ci/variables/) on the project, or on the group when several
+projects feed the same Yontrack. The first two carry credentials and the token must be _masked_:
+
+| Variable | |
+|---|---|
+| `YONTRACK_URL` | URL of the Yontrack installation, like `https://yontrack.example.com` |
+| `YONTRACK_TOKEN` | A Yontrack API token. Masked, so that it is hidden in the job logs. |
+| `YONTRACK_CLI_VERSION` | The CLI release to install, like `5.4.0`. Not a secret. |
+
+_Protected_ is the setting to weigh: a protected variable reaches only the pipelines running on a protected branch or
+tag, and every other pipeline gets an empty `YONTRACK_TOKEN` and fails to register its build. Protect the token when
+only protected branches feed Yontrack; leave it unprotected when feature branches do too.
+
+These are the variables the scripts below hand to `config create`; the CLI does not read them itself. The only
+environment variables it reads are `YONTRACK_PROJECT_NAME`, `YONTRACK_BRANCH_NAME`, `YONTRACK_BUILD_NAME` and
+`YONTRACK_BUILD_ID`, all of them produced by `--output env`.
+
+### Installing the CLI
+
+Every job which uses the CLI starts with the same lines, which belong in its `before_script`:
+
+```bash
+apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates
+export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | VERSION="$YONTRACK_CLI_VERSION" sh
+yontrack config create prod "$YONTRACK_URL" --token "$YONTRACK_TOKEN"
+```
+
+The [install script](#the-install-script) needs `curl` in the image, which the first line installs the Debian and
+Ubuntu way; an Alpine image uses `apk add --no-cache curl` instead, and an image which already carries `curl` drops
+the line altogether. The script installs into `$HOME/.local/bin`, which is why the `PATH` is extended next. `VERSION`
+pins the release: with `YONTRACK_CLI_VERSION` left undefined the script installs the latest one, and the pipeline then
+depends on whatever was published last.
+
+`before_script` and `script` run in the same shell, so that `export` reaches every command of the job - `after_script`
+does not, and extends the `PATH` again. The configuration `config create` writes is `.yontrack-config.yaml` in the
+working directory, which is the clone of the repository: it carries the token, so keep it out of the `artifacts` and
+`cache` patterns of the job.
+
+### Registering the build
+
+`ci config` creates the project, the branch and the build from the environment. The GitLab variables are passed with
+`--env-all`, which selects every variable carrying a given prefix:
+
+```bash
+yontrack ci config \
+  --env-all CI_ \
+  --env-all GITLAB_CI \
+  --var version="1.0.$CI_PIPELINE_IID" \
+  --output env > yontrack.env
+```
+
+The flag is given twice because GitLab's predefined variables are the `CI_` ones, while the variable the CI engine is
+recognised by is `GITLAB_CI`, which carries no such prefix - a prefix matches its own variable, so the second
+`--env-all` selects that one.
+
+Yontrack recognises GitLab CI and GitLab from those variables on its own, so neither `--ci gitlab-ci` nor
+`--scm gitlab` has to be given; the flags are there to force them.
+
+`--var version=...` builds the version from `CI_PIPELINE_IID`, the counter GitLab increments at each pipeline of the
+project. Its sibling `CI_PIPELINE_ID` is unique across the whole GitLab instance and jumps by arbitrary amounts, which
+makes a poor version number. The variable is used from `.yontrack/ci.yaml` as:
+
+```yaml
+version: v1
+configuration:
+  build:
+    name: "{{ vars \"version\" }}"
+```
+
+Only the `export` lines go to standard output - `ci config` traces what it reads on standard error - so the
+redirection above captures the identity of the build and nothing else.
+
+> `--env-all` sends every variable carrying the prefix to Yontrack and echoes each of them to the job log. On GitLab
+> the `CI_` prefix covers more than the identity of the pipeline: `CI_JOB_TOKEN`, `CI_REPOSITORY_URL`, which embeds
+> it, and `CI_REGISTRY_PASSWORD` where the container registry is enabled, are all predefined and all carry
+> credentials. Where that matters, list the variables you need with `--env` instead.
+
+### Passing the build between jobs
+
+`--output env` wrote the identity of the build into `yontrack.env`:
+
+```text
+export YONTRACK_PROJECT_ID=123
+export YONTRACK_PROJECT_NAME=my-project
+export YONTRACK_BRANCH_ID=456
+export YONTRACK_BRANCH_NAME=main
+export YONTRACK_BUILD_ID=789
+export YONTRACK_BUILD_NAME=1.0.42
+```
+
+Declare that file as an artifact of the job which produced it:
+
+```yaml
+  artifacts:
+    paths:
+      - yontrack.env
+```
+
+A job is given the artifacts of every job of the earlier stages - or of the jobs it lists in `needs` - so sourcing the
+file is enough for the other commands to find the build without any `--project`, `--branch` or `--build` flag:
+
+```bash
+. ./yontrack.env
+yontrack validate --validation unit-tests --status PASSED
+```
+
+`.` rather than `source`, which is a `bash` builtin that the `/bin/sh` of a minimal image does not have.
+
+**This is the route to prefer**: one call to Yontrack for the whole pipeline, and it does not depend on what the build
+carries.
+
+If sourcing a file in each job is one step too many, the same file can be declared as a `dotenv` report instead, and
+GitLab turns it into variables of the later jobs. The report is read as `KEY=value` lines and does not accept the
+`export ` prefix that `--output env` writes, so that prefix is stripped first:
+
+```bash
+yontrack ci config \
+  --env-all CI_ \
+  --env-all GITLAB_CI \
+  --var version="1.0.$CI_PIPELINE_IID" \
+  --output env | sed 's/^export //' > yontrack.env
+```
+
+```yaml
+  artifacts:
+    reports:
+      dotenv: yontrack.env
+```
+
+The other route is to look the build up again in each job, from the commit the pipeline runs on:
+
+```bash
+eval "$(yontrack build search --project my-project --commit "$CI_COMMIT_SHA" --count 1 --output env)"
+```
+
+This prints the very same exports, but it costs a query per job, the project name has to be known by every job, and it
+only finds the build if that build carries the Git commit property - which `build setup --commit "$CI_COMMIT_SHA"`
+sets. Add `--accept-not-found` if a missing build should not fail the search itself - nothing is then exported, and
+the failure moves to the first command needing `YONTRACK_PROJECT_NAME`. In a merged results pipeline it finds nothing
+at all: `CI_COMMIT_SHA` is then the temporary merge commit GitLab created for the run, and not the commit the build
+was registered with.
+
+### Validations
+
+`after_script` runs once the `script` of its job is over, whether it succeeded or not, and GitLab sets `CI_JOB_STATUS`
+to `success`, `failed` or `canceled`. That is where a validation belongs: recorded from `after_script`, a failing job
+gets a `FAILED` validation run instead of being skipped along with the job.
+
+```yaml
+  after_script:
+    - |
+      export PATH="$HOME/.local/bin:$PATH"
+      . ./yontrack.env
+      if [ "$CI_JOB_STATUS" = "success" ]; then
+        yontrack validate --validation unit-tests --status PASSED
+      else
+        yontrack validate --validation unit-tests --status FAILED
+      fi
+```
+
+The `PATH` is extended again because `after_script` runs in a shell of its own, which the `before_script` of the job
+does not feed; the binary itself is still there, in the same container. A cancelled job falls into the `else` above
+and is recorded as a failure - test `CI_JOB_STATUS` for `failed` alone if that is not what you want.
+
+### Run info
+
+Nothing has to be passed for the run info: inside GitLab CI the CLI fills in the source type, the pipeline URL, the
+trigger type and the commit on its own - see [GitLab CI defaults](#gitlab-ci-defaults) for the exact values. The run
+time is the exception, since only the caller knows it:
+
+```bash
+start=$(date +%s)
+./gradlew test
+yontrack validate --validation unit-tests --status PASSED --run-time $(( $(date +%s) - start ))
+```
+
+Measured in the `script` like this, the duration does not reach the `after_script`, which runs in a shell of its own:
+a job which wants both the duration and `CI_JOB_STATUS` writes the start time to a file first.
+
+### A complete `.gitlab-ci.yml`
+
+```yaml
+stages:
+  - yontrack
+  - test
+
+default:
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates
+    - export PATH="$HOME/.local/bin:$PATH"
+    - curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | VERSION="$YONTRACK_CLI_VERSION" sh
+    - yontrack config create prod "$YONTRACK_URL" --token "$YONTRACK_TOKEN"
+
+yontrack-build:
+  stage: yontrack
+  script:
+    - |
+      yontrack ci config \
+        --env-all CI_ \
+        --env-all GITLAB_CI \
+        --var version="1.0.$CI_PIPELINE_IID" \
+        --output env > yontrack.env
+  artifacts:
+    paths:
+      - yontrack.env
+
+unit-tests:
+  stage: test
+  image: eclipse-temurin:21-jdk
+  script:
+    - ./gradlew test
+  after_script:
+    - |
+      export PATH="$HOME/.local/bin:$PATH"
+      . ./yontrack.env
+      if [ "$CI_JOB_STATUS" = "success" ]; then
+        yontrack validate --validation unit-tests --status PASSED
+      else
+        yontrack validate --validation unit-tests --status FAILED
+      fi
+```
+
+The first job registers the build and publishes `yontrack.env`; the second one runs the tests and records their
+outcome against that build. Any further job follows the same shape: the shared `before_script`, `. ./yontrack.env`,
+then whichever `yontrack` command it needs.
+
+Both images here are Debian-based, which is what lets one `before_script` serve them; a job on an image of another
+family installs `curl` the way that family does, and overrides the `before_script` accordingly.
 
 # Contributing
 
