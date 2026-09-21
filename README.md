@@ -9,7 +9,7 @@ The Yontrack CLI is a Command Line Interface tool, available on many platforms, 
 
 > Yontrack was previously called Ontrack. The GitHub organisation, the companion repositories and the GraphQL schema file still carry the old name; links and commands below use it deliberately and are not stale.
 
-> The Ontrack CLI works only with the version 4 of [Ontrack](https://github.com/nemerosa/ontrack).
+> The Yontrack CLI 5.x works with [Yontrack](https://github.com/nemerosa/ontrack) 5.x.
 
 # Installation
 
@@ -100,8 +100,6 @@ yontrack config create prod https://ontrack.example.com --token <token>
 This registers an installation called `prod`, located at https://ontrack.example.com, using an authentication token.
 
 The configuration is stored on disk, in `~/.yontrack-config.yaml` and the `config create` needs to be done only once.
-
-> The Ontrack CLI supports only version 4.x and beyond of Ontrack.
 
 ## Managing configurations
 
