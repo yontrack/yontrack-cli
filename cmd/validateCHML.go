@@ -41,47 +41,7 @@ For example:
     yontrack validate -p PROJECT -b BRANCH -n BUILD -v VALIDATION chml --critical 1 --high 2
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		project, branch, err := utils.GetProjectBranchFlags(cmd, false, true)
-		if err != nil {
-			return err
-		}
-
-		build, err := cmd.Flags().GetString("build")
-		if err != nil {
-			return err
-		}
-
-		validation, err := cmd.Flags().GetString("validation")
-		if err != nil {
-			return err
-		}
-
-		description, err := cmd.Flags().GetString("description")
-		if err != nil {
-			return err
-		}
-
-		critical, err := cmd.Flags().GetInt("critical")
-		if err != nil {
-			return err
-		}
-
-		high, err := cmd.Flags().GetInt("high")
-		if err != nil {
-			return err
-		}
-
-		medium, err := cmd.Flags().GetInt("medium")
-		if err != nil {
-			return err
-		}
-
-		low, err := cmd.Flags().GetInt("low")
-		if err != nil {
-			return err
-		}
-
-		runInfo, err := GetRunInfo(cmd)
+		variables, err := validateCHMLVariables(cmd)
 		if err != nil {
 			return err
 		}
@@ -132,18 +92,7 @@ For example:
 					}
 				}
 			}
-		`, map[string]interface{}{
-			"project":         project,
-			"branch":          branch,
-			"build":           build,
-			"validationStamp": validation,
-			"description":     description,
-			"runInfo":         runInfo,
-			"critical":        critical,
-			"high":            high,
-			"medium":          medium,
-			"low":             low,
-		}, &payload); err != nil {
+		`, variables, &payload); err != nil {
 			return err
 		}
 
@@ -155,6 +104,64 @@ For example:
 		// OK
 		return nil
 	},
+}
+
+// validateCHMLVariables reads the flags of 'validate chml' into the variables
+// of its mutation. The build falls back to YONTRACK_BUILD_NAME, as for every
+// other 'validate' subcommand.
+func validateCHMLVariables(cmd *cobra.Command) (map[string]interface{}, error) {
+	project, branch, build, err := utils.GetProjectBranchBuildFlags(cmd, false, true)
+	if err != nil {
+		return nil, err
+	}
+
+	validation, err := cmd.Flags().GetString("validation")
+	if err != nil {
+		return nil, err
+	}
+
+	description, err := cmd.Flags().GetString("description")
+	if err != nil {
+		return nil, err
+	}
+
+	critical, err := cmd.Flags().GetInt("critical")
+	if err != nil {
+		return nil, err
+	}
+
+	high, err := cmd.Flags().GetInt("high")
+	if err != nil {
+		return nil, err
+	}
+
+	medium, err := cmd.Flags().GetInt("medium")
+	if err != nil {
+		return nil, err
+	}
+
+	low, err := cmd.Flags().GetInt("low")
+	if err != nil {
+		return nil, err
+	}
+
+	runInfo, err := GetRunInfo(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"project":         project,
+		"branch":          branch,
+		"build":           build,
+		"validationStamp": validation,
+		"description":     description,
+		"runInfo":         runInfo,
+		"critical":        critical,
+		"high":            high,
+		"medium":          medium,
+		"low":             low,
+	}, nil
 }
 
 func init() {
