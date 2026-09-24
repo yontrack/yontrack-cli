@@ -671,6 +671,33 @@ yontrack validate --project <project> --branch <branch> --build <build> --valida
         --metrics weight=145,height=185.1
 ```
 
+## Security findings
+
+A report of security findings is sent with the `findings` subcommand. The CLI sends the file as is:
+Yontrack parses it, records the findings and computes the status of the validation from the
+thresholds of its `security-findings` validation stamp.
+
+> This command requires Yontrack 6.0, unlike the rest of this CLI. Against Yontrack 5.x, it fails
+> with Yontrack's own error.
+
+```bash
+yontrack validate --project <project> --branch <branch> --build <build> --validation <validation> \
+    findings \
+        --format trivy \
+        --kind IMAGE \
+        --report trivy.json
+```
+
+* `--format` (required) - format of the report:
+  * `findings` - Yontrack's neutral format
+  * `sarif` - SARIF 2.1
+  * `trivy` - Trivy JSON (vulnerabilities only)
+* `--kind` (required) - what was scanned: `IMAGE`, `CODE`, `SECRETS`, `DAST`, `DEPENDENCIES` or `OTHER`
+* `--scanner` - name of the scanner, overriding the one Yontrack reads from the report
+* `--report` (required) - path to the report, a JSON file
+
+> `sarif` and `trivy` rely on a licensed feature of Yontrack; `findings` does not.
+
 ## Run info
 
 The `validate` commands accept additional flags to set the run info on a validation (source & trigger, duration):

@@ -4,24 +4,13 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// chmlCmdWithArgs parses args against the real 'validate chml' command, and
-// puts its flags back to their defaults once the test is over, since the
-// command is shared by the whole package.
+// chmlCmdWithArgs parses args against the real 'validate chml' command.
 func chmlCmdWithArgs(t *testing.T, args ...string) *cobra.Command {
-	t.Helper()
-	t.Cleanup(func() {
-		validateCHMLCmd.Flags().VisitAll(func(f *pflag.Flag) {
-			_ = f.Value.Set(f.DefValue)
-			f.Changed = false
-		})
-	})
-	require.NoError(t, validateCHMLCmd.ParseFlags(args))
-	return validateCHMLCmd
+	return cmdWithArgs(t, validateCHMLCmd, args...)
 }
 
 // In CI, the build comes from YONTRACK_BUILD_NAME, as for every other
