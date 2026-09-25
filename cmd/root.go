@@ -83,7 +83,7 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	rootCmd.PersistentFlags().StringVar(&config.ConfigFilePath, "config", "./.yontrack-config.yaml", "Configuration file path.")
+	rootCmd.PersistentFlags().StringVar(&config.ConfigFilePath, "config", "", "Configuration file path. When not set: $YONTRACK_CONFIG if set, else ./.yontrack-config.yaml if it exists, else ~/.yontrack-config.yaml if it exists, else ./.yontrack-config.yaml.")
 
 	rootCmd.PersistentFlags().BoolVar(&config.GraphQLLogging, "graphql-log", false, "Enable traces on the GraphQL calls.")
 }

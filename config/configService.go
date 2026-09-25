@@ -1,11 +1,11 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v2"
 )
@@ -56,16 +56,13 @@ func GetSelectedConfiguration() (*Config, error) {
 		}
 		return nil, fmt.Errorf("No configuration named %s", selected)
 	}
-	return nil, errors.New("No current configuration")
+	return nil, fmt.Errorf("No current configuration (in %s)", getConfigFilePath())
 }
 
 // Reads the configuration
 func ReadRootConfiguration() (*RootConfig, error) {
 	var root RootConfig
-	configFilePath, err := getConfigFilePath()
-	if err != nil {
-		return nil, err
-	}
+	configFilePath := getConfigFilePath()
 
 	// If the config file does not exist, returns an empty root config
 	if _, err := os.Stat(configFilePath); err != nil {
@@ -76,7 +73,7 @@ func ReadRootConfiguration() (*RootConfig, error) {
 
 	reader, _ := os.Open(configFilePath)
 	buf, _ := io.ReadAll(reader)
-	err = yaml.Unmarshal(buf, &root)
+	err := yaml.Unmarshal(buf, &root)
 	return &root, err
 }
 
@@ -110,10 +107,7 @@ func AddConfiguration(config Config, override bool) error {
 		Configurations: configurations,
 	}
 	// Saves the root configuration back
-	configFilePath, err := getConfigFilePath()
-	if err != nil {
-		return err
-	}
+	configFilePath := getConfigFilePath()
 	buf, _ := yaml.Marshal(newRoot)
 	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
 	_ = ioutil.WriteFile(configFilePath, buf, 0600)
@@ -156,10 +150,7 @@ func SetSelectedConfiguration(name string) error {
 		Configurations: root.Configurations,
 	}
 	// Saves the root configuration back
-	configFilePath, err := getConfigFilePath()
-	if err != nil {
-		return err
-	}
+	configFilePath := getConfigFilePath()
 	buf, _ := yaml.Marshal(newRoot)
 	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
 	_ = os.WriteFile(configFilePath, buf, 0600)
@@ -182,10 +173,7 @@ func SetConfigurationState(name string, disabled bool) error {
 	existing.Disabled = disabled
 	replaceConfigurationByName(root, existing)
 	// Saves the root configuration back
-	configFilePath, err := getConfigFilePath()
-	if err != nil {
-		return err
-	}
+	configFilePath := getConfigFilePath()
 	buf, _ := yaml.Marshal(root)
 	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
 	_ = os.WriteFile(configFilePath, buf, 0600)
@@ -221,10 +209,7 @@ func DeleteConfiguration(name string) error {
 		Configurations: configurations,
 	}
 	// Saves the root configuration back
-	configFilePath, err := getConfigFilePath()
-	if err != nil {
-		return err
-	}
+	configFilePath := getConfigFilePath()
 	buf, _ := yaml.Marshal(newRoot)
 	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
 	_ = os.WriteFile(configFilePath, buf, 0600)
@@ -233,7 +218,45 @@ func DeleteConfiguration(name string) error {
 	return nil
 }
 
-// Gets the path to the configuration file
-func getConfigFilePath() (string, error) {
-	return ConfigFilePath, nil
+// Name of the configuration file, in the working directory or in the home directory
+const configFileName = ".yontrack-config.yaml"
+
+// Configuration file in the working directory
+const localConfigFilePath = "./" + configFileName
+
+// Environment variable giving the path to the configuration file
+const configFileEnv = "YONTRACK_CONFIG"
+
+// Gets the path to the configuration file. The first match wins:
+//
+//  1. the --config flag, when set, whether the file exists or not
+//  2. the YONTRACK_CONFIG environment variable, when not empty, whether the file exists or not
+//  3. ./.yontrack-config.yaml, when it exists - what CI writes and reads
+//  4. ~/.yontrack-config.yaml, when it exists
+//  5. ./.yontrack-config.yaml otherwise, so that a first 'config create' writes there
+//
+// Reads and writes both go through it, so a configuration is written back to
+// the file it was read from.
+func getConfigFilePath() string {
+	if ConfigFilePath != "" {
+		return ConfigFilePath
+	}
+	if path := os.Getenv(configFileEnv); path != "" {
+		return path
+	}
+	if fileExists(localConfigFilePath) {
+		return localConfigFilePath
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		homeConfigFilePath := filepath.Join(home, configFileName)
+		if fileExists(homeConfigFilePath) {
+			return homeConfigFilePath
+		}
+	}
+	return localConfigFilePath
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
