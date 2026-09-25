@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"yontrack/client"
 	config "yontrack/config"
 
@@ -49,6 +50,15 @@ or by its version, which is its release property:
 Starting a pipeline is only the beginning of a deployment: the slot's own
 workflows carry it the rest of the way. The pipeline ID is printed so that the
 deployment can be followed afterwards.
+
+The build must be eligible for the slot, or the command fails. An eligible build
+is not always deployable yet, though - one which is not promoted yet, for
+example. The pipeline is then created as a candidate, which cannot run until
+the slot's admission rules are met. The command still succeeds, but prints a
+warning on stderr listing the rules which are not met. To list the builds
+which are deployable:
+
+    yontrack slot builds --project my-project --environment production
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return slotPipelineStart(cmd)
@@ -101,6 +111,12 @@ func slotPipelineStart(cmd *cobra.Command) error {
 		return err
 	}
 
+	// A candidate which cannot run yet is still a success, but it must not go
+	// unnoticed. The warning goes to stderr, so that the output stays parseable.
+	if warning := notDeployableWarning(pipeline); warning != "" {
+		_, _ = fmt.Fprint(cmd.ErrOrStderr(), warning)
+	}
+
 	switch output {
 	case "id":
 		fmt.Println(pipeline.Id)
@@ -131,6 +147,30 @@ func checkBuildSelector(name, version string) error {
 	return nil
 }
 
+// notDeployableWarning is the warning to print when the pipeline was created as
+// a candidate which cannot run yet, listing the admission rules which are not
+// met. It is "" when the pipeline can run, or when the server does not tell.
+func notDeployableWarning(pipeline *startedSlotPipeline) string {
+	if pipeline.RunAction == nil || pipeline.RunAction.Ok == nil || *pipeline.RunAction.Ok {
+		return ""
+	}
+	var reasons strings.Builder
+	for _, rule := range pipeline.AdmissionRules {
+		if rule.Overridden || (rule.Check.Ok != nil && *rule.Check.Ok) {
+			continue
+		}
+		name := rule.AdmissionRuleConfig.Name
+		if name == "" {
+			name = rule.AdmissionRuleConfig.RuleId
+		}
+		_, _ = fmt.Fprintf(&reasons, "  - %s: %s\n", name, rule.Check.Reason)
+	}
+	if reasons.Len() == 0 {
+		return fmt.Sprintf("Pipeline #%d created as a candidate — not deployable yet\n", pipeline.Number)
+	}
+	return fmt.Sprintf("Pipeline #%d created as a candidate — not deployable yet:\n%s", pipeline.Number, reasons.String())
+}
+
 // startSlotPipelineInput builds the StartSlotPipelineInput for the mutation.
 // buildId is an Int in the schema, so it is passed as a number and never as a string.
 func startSlotPipelineInput(slotId string, buildId int) map[string]interface{} {
@@ -141,10 +181,10 @@ func startSlotPipelineInput(slotId string, buildId int) map[string]interface{} {
 }
 
 // startSlotPipeline starts a pipeline for the build on the slot, and returns it.
-func startSlotPipeline(cfg *config.Config, slotId string, buildId int) (*slotPipelineRef, error) {
+func startSlotPipeline(cfg *config.Config, slotId string, buildId int) (*startedSlotPipeline, error) {
 	var data struct {
 		StartSlotPipeline struct {
-			Pipeline *slotPipelineRef
+			Pipeline *startedSlotPipeline
 			Errors   []struct{ Message string }
 		}
 	}
@@ -155,6 +195,20 @@ func startSlotPipeline(cfg *config.Config, slotId string, buildId int) (*slotPip
 				pipeline {
 					id
 					number
+					runAction {
+						ok
+					}
+					admissionRules {
+						admissionRuleConfig {
+							name
+							ruleId
+						}
+						check {
+							ok
+							reason
+						}
+						overridden
+					}
 				}
 				errors {
 					message
