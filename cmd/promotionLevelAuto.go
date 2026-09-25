@@ -157,7 +157,7 @@ promotions:
 					validation,
 					"",
 					"",
-					"",
+					nil,
 				)
 				if err != nil {
 					return err

@@ -320,13 +320,18 @@ The `validation-stamp setup` (or `vs setup` for a shortcut) command is idempoten
 
 Additionally, a validation stamp can be created with a
 [data type](https://docs.yontrack.com/yontrack/ref/latest/content/concepts/model/index.html#validation-stamp-types)
-and its configuration. For example, to create a CHML validation type:
+and its configuration, as JSON. For example, to create a CHML validation type:
 
 ```bash
 yontrack validation-stamp setup --project <project> --branch <branch> --validation <validation> \
     --data-type net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType \
-    --data-config '{warningLevel: {level: "HIGH",value:1},failedLevel:{level:"CRITICAL",value:1}}'
+    --data-config '{"warningLevel":"HIGH","warningValue":1,"failedLevel":"CRITICAL","failedValue":1}'
 ```
+
+The configuration is given in the data type's _form_ shape, which is what Yontrack reads when setting a validation
+stamp up - not the shape it stores. For CHML and security findings, that's the flat `warningLevel` / `warningValue` /
+`failedLevel` / `failedValue` of `.yontrack/ci.yaml`, not nested `{level, value}` objects. A `--data-config` which is
+not valid JSON is refused before anything is sent.
 
 The later syntax is pretty cumbersome and the CLI provides dedicated commands for the most used data types:
 

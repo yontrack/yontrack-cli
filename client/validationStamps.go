@@ -1,12 +1,14 @@
 package client
 
 import (
-	"bytes"
-	"text/template"
+	"encoding/json"
 
 	config "yontrack/config"
 )
 
+// SetupValidationStamp creates or updates a validation stamp. The data type
+// configuration, if any, is sent as a JSON variable, never spliced into the
+// query; nil sends null.
 func SetupValidationStamp(
 	cfg *config.Config,
 	project string,
@@ -14,50 +16,8 @@ func SetupValidationStamp(
 	validation string,
 	description string,
 	dataType string,
-	dataTypeConfig string,
+	dataTypeConfig json.RawMessage,
 ) error {
-
-	tmpl, err := template.New("mutation").Parse(`
-		mutation SetupValidationStamp(
-			$project: String!,
-			$branch: String!,
-			$validation: String!,
-			$description: String,
-			$dataType: String
-		) {
-			setupValidationStamp(input: {
-				project: $project,
-				branch: $branch,
-				validation: $validation,
-				description: $description,
-				dataType: $dataType,
-				dataTypeConfig: {{ .DataTypeConfig }}
-			}) {
-				errors {
-					message
-				}
-			}
-		}
-	`)
-	if err != nil {
-		return err
-	}
-
-	var tmplInput struct {
-		DataTypeConfig string
-	}
-
-	if dataTypeConfig != "" {
-		tmplInput.DataTypeConfig = dataTypeConfig
-	} else {
-		tmplInput.DataTypeConfig = "null"
-	}
-
-	var query bytes.Buffer
-	if err := tmpl.Execute(&query, tmplInput); err != nil {
-		return err
-	}
-
 	var data struct {
 		SetupValidationStamp struct {
 			Errors []struct {
@@ -65,7 +25,29 @@ func SetupValidationStamp(
 			}
 		}
 	}
-	if err := GraphQLCall(cfg, query.String(), map[string]interface{}{
+	if err := GraphQLCall(cfg, `
+		mutation SetupValidationStamp(
+			$project: String!,
+			$branch: String!,
+			$validation: String!,
+			$description: String,
+			$dataType: String,
+			$dataTypeConfig: JSON
+		) {
+			setupValidationStamp(input: {
+				project: $project,
+				branch: $branch,
+				validation: $validation,
+				description: $description,
+				dataType: $dataType,
+				dataTypeConfig: $dataTypeConfig
+			}) {
+				errors {
+					message
+				}
+			}
+		}
+	`, map[string]interface{}{
 		"project":        project,
 		"branch":         branch,
 		"validation":     validation,
