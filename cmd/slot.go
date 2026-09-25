@@ -36,6 +36,10 @@ up, together with what it currently runs:
 
     yontrack slot get --project my-project --environment production
 
+To list the builds which can be deployed into it:
+
+    yontrack slot builds --project my-project --environment production
+
 To deploy a build into it:
 
     yontrack slot pipeline start --project my-project --environment production --build 1

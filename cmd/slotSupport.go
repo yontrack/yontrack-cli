@@ -22,6 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"yontrack/client"
 	config "yontrack/config"
@@ -39,6 +40,43 @@ type slotPipelineRef struct {
 	Id     string     `json:"id"`
 	Number int        `json:"number"`
 	Build  *slotBuild `json:"build"`
+}
+
+// startedSlotPipeline is a pipeline which has just been started, together with
+// what tells whether it can run.
+type startedSlotPipeline struct {
+	slotPipelineRef
+	RunAction      *slotPipelineRunAction
+	AdmissionRules []slotPipelineAdmissionRule
+}
+
+// MarshalJSON keeps the JSON output of 'slot pipeline start' the one of
+// slotPipelineRef: whether it can run is told by a warning instead.
+func (p startedSlotPipeline) MarshalJSON() ([]byte, error) {
+	return json.Marshal(p.slotPipelineRef)
+}
+
+// slotPipelineRunAction tells whether a pipeline can be actioned into a running
+// state. Ok is nil when the server cannot tell.
+type slotPipelineRunAction struct {
+	Ok *bool
+}
+
+// slotPipelineAdmissionRule is the state of one admission rule for a pipeline.
+type slotPipelineAdmissionRule struct {
+	AdmissionRuleConfig slotAdmissionRuleConfig
+	Check               slotDeploymentCheck
+	Overridden          bool
+}
+
+type slotAdmissionRuleConfig struct {
+	Name   string
+	RuleId string
+}
+
+type slotDeploymentCheck struct {
+	Ok     *bool
+	Reason string
 }
 
 // slot is a project's deployment slot in an environment.

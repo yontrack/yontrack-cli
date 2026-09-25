@@ -909,6 +909,25 @@ echo "$YONTRACK_SLOT_ID $YONTRACK_SLOT_DEPLOYED_BUILD_NAME"
 
 A slot which has never completed a deployment has no last deployed build, and those values are empty.
 
+## Listing the builds to deploy
+
+To list the builds which can be deployed into a slot, most recent first:
+
+```bash
+yontrack slot builds --project my-project --environment production
+```
+
+This lists the _deployable_ builds only: the ones meeting all the slot's admission rules. A build can be _eligible_
+for a slot without being deployable yet - not promoted yet, for example. `--all` lists every eligible build, including
+those:
+
+```bash
+yontrack slot builds --project my-project --environment production --all
+```
+
+By default the build names are printed, one per line, at most 10 of them (`--count` changes that). `--output json`
+prints their IDs and display names too.
+
 ## Starting a deployment
 
 To deploy a build into a slot, start a pipeline for it. The build is identified by name:
@@ -936,7 +955,14 @@ yontrack slot pipeline start --project my-project --environment production --bui
 }
 ```
 
-The command fails if the deployment is refused - because the build does not meet the slot's admission rules, for example - so a CI job does not have to inspect the output to know whether it worked.
+The command fails if the deployment is refused - because the build is not eligible for the slot, for example - so a CI job does not have to inspect the output to know whether it worked.
+
+A build can be eligible for a slot without being deployable yet: a slot requiring a `BRONZE` promotion accepts a build which is not promoted yet. The pipeline is then created as a candidate, which cannot run until its admission rules are met, or are overridden by hand. The command still succeeds, since the pipeline exists, but warns on stderr about the rules which are not met:
+
+```
+Pipeline #3 created as a candidate — not deployable yet:
+  - promotion: Build not promoted
+```
 
 # Misc
 
