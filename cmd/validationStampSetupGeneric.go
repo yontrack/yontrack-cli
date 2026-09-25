@@ -22,12 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"yontrack/utils"
-
 	"github.com/spf13/cobra"
-
-	client "yontrack/client"
-	config "yontrack/config"
 )
 
 // validationStampSetupGenericCmd represents the validationStampSetupGeneric command
@@ -36,74 +31,15 @@ var validationStampSetupGenericCmd = &cobra.Command{
 	Short: "Setup a validation stamp using a generic format",
 	Long: `Setup a validation stamp using a generic format.
 
-To create a plain validation stamp (without any data type):
-
-	yontrack vs setup generic --project PROJECT --branch BRANCH --validation STAMP
-
-You can also associate a data type with it, using the JSON representation of the configuration:
-
-    yontrack vs setup generic --project PROJECT --branch BRANCH --validation STAMP \
-        --data-type "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType" \
-        --data-config '{warningLevel: {level: "HIGH",value:1}, failedLevel:{level:"CRITICAL",value:1}}'
-
-Note that specific commands per type are also available, see 'yontrack vs setup'.
-	`,
+This is the same as 'yontrack vs setup', see 'yontrack vs setup --help'.
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		project, branch, err := utils.GetProjectBranchFlags(cmd, false, true)
-		if err != nil {
-			return err
-		}
-
-		validation, err := cmd.Flags().GetString("validation")
-		if err != nil {
-			return err
-		}
-
-		description, err := cmd.Flags().GetString("description")
-		if err != nil {
-			return err
-		}
-
-		dataType, err := cmd.Flags().GetString("data-type")
-		if err != nil {
-			return err
-		}
-
-		dataTypeConfig, err := cmd.Flags().GetString("data-config")
-		if err != nil {
-			return err
-		}
-
-		cfg, err := config.GetSelectedConfiguration()
-		if err != nil {
-			return err
-		}
-
-		return client.SetupValidationStamp(
-			cfg,
-			project,
-			branch,
-			validation,
-			description,
-			dataType,
-			dataTypeConfig,
-		)
+		return setupValidationStamp(cmd)
 	},
 }
 
 func init() {
 	validationStampSetupCmd.AddCommand(validationStampSetupGenericCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// validationStampSetupGenericCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	validationStampSetupGenericCmd.PersistentFlags().StringP("data-type", "t", "", "FQCN of the data type")
-	validationStampSetupGenericCmd.PersistentFlags().StringP("data-config", "c", "", "JSON for the data type configuration")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// validationStampSetupGenericCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	addDataTypeFlags(validationStampSetupGenericCmd)
 }

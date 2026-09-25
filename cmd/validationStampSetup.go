@@ -22,15 +22,82 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"yontrack/utils"
+
 	"github.com/spf13/cobra"
+
+	client "yontrack/client"
+	config "yontrack/config"
 )
 
 // validationStampSetupCmd represents the validationStampSetup command
 var validationStampSetupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Creates or updates a validation stamp",
-	Long:  `Creates or updates a validation stamp.`,
-	// Run: func(cmd *cobra.Command, args []string) {},
+	Long: `Creates or updates a validation stamp.
+
+To create a plain validation stamp (without any data type):
+
+	yontrack vs setup --project PROJECT --branch BRANCH --validation STAMP
+
+You can also associate a data type with it, using the JSON representation of the configuration:
+
+	yontrack vs setup --project PROJECT --branch BRANCH --validation STAMP \
+		--data-type "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType" \
+		--data-config '{warningLevel: {level: "HIGH",value:1}, failedLevel:{level:"CRITICAL",value:1}}'
+
+Dedicated commands for the most used data types are also available, see the
+subcommands below.
+`,
+	// Rejects a mistyped subcommand instead of setting up a plain validation stamp
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setupValidationStamp(cmd)
+	},
+}
+
+// setupValidationStamp creates or updates a validation stamp, with the data
+// type and configuration given by the --data-type and --data-config flags.
+func setupValidationStamp(cmd *cobra.Command) error {
+	project, branch, err := utils.GetProjectBranchFlags(cmd, false, true)
+	if err != nil {
+		return err
+	}
+
+	validation, err := cmd.Flags().GetString("validation")
+	if err != nil {
+		return err
+	}
+
+	description, err := cmd.Flags().GetString("description")
+	if err != nil {
+		return err
+	}
+
+	dataType, err := cmd.Flags().GetString("data-type")
+	if err != nil {
+		return err
+	}
+
+	dataTypeConfig, err := cmd.Flags().GetString("data-config")
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.GetSelectedConfiguration()
+	if err != nil {
+		return err
+	}
+
+	return client.SetupValidationStamp(
+		cfg,
+		project,
+		branch,
+		validation,
+		description,
+		dataType,
+		dataTypeConfig,
+	)
 }
 
 func init() {
@@ -46,7 +113,12 @@ func init() {
 
 	validationStampSetupCmd.MarkPersistentFlagRequired("validation")
 
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// validationStampSetupCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// Local flags: the dedicated commands per data type do not take them
+	addDataTypeFlags(validationStampSetupCmd)
+}
+
+// addDataTypeFlags registers the flags read by setupValidationStamp.
+func addDataTypeFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("data-type", "t", "", "FQCN of the data type")
+	cmd.Flags().StringP("data-config", "c", "", "JSON for the data type configuration")
 }
