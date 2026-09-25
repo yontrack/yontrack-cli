@@ -99,7 +99,29 @@ yontrack config create prod https://ontrack.example.com --token <token>
 
 This registers an installation called `prod`, located at https://ontrack.example.com, using an authentication token.
 
-The configuration is stored on disk, in `~/.yontrack-config.yaml` and the `config create` needs to be done only once.
+The configuration is stored on disk, in a `.yontrack-config.yaml` file, and the `config create` needs to be done only
+once.
+
+## Where the configuration file is
+
+Every command looks the configuration file up the same way, and the first match wins:
+
+1. `--config <path>`, when given, whether the file exists or not.
+2. The `YONTRACK_CONFIG` environment variable, when set and not empty, whether the file exists or not.
+3. `./.yontrack-config.yaml`, in the current directory, when it exists. This is the file the CI integrations write
+   and read.
+4. `~/.yontrack-config.yaml`, in your home directory, when it exists.
+5. Otherwise `./.yontrack-config.yaml`, so a first `config create` writes into the current directory.
+
+To register a configuration once and use it from any directory, create it in your home directory:
+
+```bash
+cd ~ && yontrack config create prod https://ontrack.example.com --token <token>
+```
+
+Commands which change the configuration - `config create`, `select`, `delete`, `enable`, `disable` - write back to the
+file it was read from. When no configuration is selected, the error names the file which was looked at:
+`No current configuration (in ./.yontrack-config.yaml)`.
 
 ## Managing configurations
 
