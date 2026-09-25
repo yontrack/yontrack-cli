@@ -22,6 +22,8 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"encoding/json"
+	"fmt"
 	"yontrack/utils"
 
 	"github.com/spf13/cobra"
@@ -40,11 +42,16 @@ To create a plain validation stamp (without any data type):
 
 	yontrack vs setup --project PROJECT --branch BRANCH --validation STAMP
 
-You can also associate a data type with it, using the JSON representation of the configuration:
+You can also associate a data type with it, giving its configuration as JSON:
 
 	yontrack vs setup --project PROJECT --branch BRANCH --validation STAMP \
 		--data-type "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType" \
-		--data-config '{warningLevel: {level: "HIGH",value:1}, failedLevel:{level:"CRITICAL",value:1}}'
+		--data-config '{"warningLevel":"HIGH","warningValue":1,"failedLevel":"CRITICAL","failedValue":1}'
+
+The configuration is read in the data type's form shape, not in the shape
+Yontrack stores it in. For CHML and security findings, that's the flat
+warningLevel / warningValue / failedLevel / failedValue of .yontrack/ci.yaml,
+not the nested {level, value} objects.
 
 Dedicated commands for the most used data types are also available, see the
 subcommands below.
@@ -79,7 +86,11 @@ func setupValidationStamp(cmd *cobra.Command) error {
 		return err
 	}
 
-	dataTypeConfig, err := cmd.Flags().GetString("data-config")
+	dataTypeConfigFlag, err := cmd.Flags().GetString("data-config")
+	if err != nil {
+		return err
+	}
+	dataTypeConfig, err := parseDataTypeConfig(dataTypeConfigFlag)
 	if err != nil {
 		return err
 	}
@@ -117,8 +128,20 @@ func init() {
 	addDataTypeFlags(validationStampSetupCmd)
 }
 
+// parseDataTypeConfig checks the --data-config flag is JSON, so that it is sent
+// as an object and not as a string. An empty flag gives nil, sent as null.
+func parseDataTypeConfig(value string) (json.RawMessage, error) {
+	if value == "" {
+		return nil, nil
+	}
+	if !json.Valid([]byte(value)) {
+		return nil, fmt.Errorf("--data-config is not valid JSON: %s", value)
+	}
+	return json.RawMessage(value), nil
+}
+
 // addDataTypeFlags registers the flags read by setupValidationStamp.
 func addDataTypeFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("data-type", "t", "", "FQCN of the data type")
-	cmd.Flags().StringP("data-config", "c", "", "JSON for the data type configuration")
+	cmd.Flags().StringP("data-config", "c", "", "JSON for the data type configuration, in the data type's form shape")
 }

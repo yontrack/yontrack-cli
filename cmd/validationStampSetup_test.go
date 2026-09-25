@@ -9,26 +9,70 @@ import (
 )
 
 // 'vs setup' sets up the validation stamp itself, with an optional data type,
-// as the README shows (issue #21).
+// as the README shows (issue #21). The configuration is plain JSON, and travels
+// as a variable: nothing is spliced into the query (issue #80).
 func TestValidationStampSetupWithDataType(t *testing.T) {
 	request := fakeYontrack(t, `{"data": {"setupValidationStamp": {"errors": []}}}`)
 	cmd := cmdWithArgs(t, validationStampSetupCmd,
 		"--project", "my-project", "--branch", "release/1.0", "--validation", "new",
-		"--data-type", "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType",
-		"--data-config", `{warningLevel: {level: "HIGH",value:1},failedLevel:{level:"CRITICAL",value:1}}`,
+		"--data-type", "net.nemerosa.ontrack.extension.findings.validation.FindingsValidationDataType",
+		"--data-config", `{"warningLevel":"HIGH","warningValue":1,"failedLevel":"CRITICAL","failedValue":1}`,
 	)
 
 	require.NoError(t, cmd.RunE(cmd, nil))
 
-	assert.Contains(t, (*request)["query"], `dataTypeConfig: {warningLevel: {level: "HIGH",value:1},failedLevel:{level:"CRITICAL",value:1}}`)
+	query := (*request)["query"].(string)
+	assert.Contains(t, query, "$dataTypeConfig: JSON")
+	assert.Contains(t, query, "dataTypeConfig: $dataTypeConfig")
+	assert.NotContains(t, query, "warningLevel")
 	variables := (*request)["variables"].(map[string]interface{})
 	assert.Equal(t, "my-project", variables["project"])
 	assert.Equal(t, "release-1.0", variables["branch"])
 	assert.Equal(t, "new", variables["validation"])
-	assert.Equal(t, "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType", variables["dataType"])
+	assert.Equal(t, "net.nemerosa.ontrack.extension.findings.validation.FindingsValidationDataType", variables["dataType"])
+	// An object, not a string holding one
+	assert.Equal(t, map[string]interface{}{
+		"warningLevel": "HIGH",
+		"warningValue": float64(1),
+		"failedLevel":  "CRITICAL",
+		"failedValue":  float64(1),
+	}, variables["dataTypeConfig"])
 }
 
-// Without any data type, 'vs setup' creates a plain validation stamp.
+// 'vs setup generic' goes the same way as 'vs setup'.
+func TestValidationStampSetupGenericSendsConfigAsVariable(t *testing.T) {
+	request := fakeYontrack(t, `{"data": {"setupValidationStamp": {"errors": []}}}`)
+	cmd := cmdWithArgs(t, validationStampSetupGenericCmd,
+		"--project", "my-project", "--branch", "main", "--validation", "new",
+		"--data-type", "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType",
+		"--data-config", `{"warningLevel":"HIGH","warningValue":1,"failedLevel":"CRITICAL","failedValue":1}`,
+	)
+
+	require.NoError(t, cmd.RunE(cmd, nil))
+
+	assert.NotContains(t, (*request)["query"], "warningLevel")
+	variables := (*request)["variables"].(map[string]interface{})
+	assert.Equal(t, "HIGH", variables["dataTypeConfig"].(map[string]interface{})["warningLevel"])
+}
+
+// A malformed --data-config fails before any call is made.
+func TestValidationStampSetupRejectsInvalidDataConfig(t *testing.T) {
+	request := fakeYontrack(t, `{"data": {"setupValidationStamp": {"errors": []}}}`)
+	cmd := cmdWithArgs(t, validationStampSetupCmd,
+		"--project", "my-project", "--branch", "main", "--validation", "new",
+		"--data-type", "net.nemerosa.ontrack.extension.general.validation.CHMLValidationDataType",
+		"--data-config", `{warningLevel: "HIGH"}`,
+	)
+
+	err := cmd.RunE(cmd, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--data-config is not valid JSON")
+	assert.Nil(t, *request, "no call must have been made")
+}
+
+// Without any data type, 'vs setup' creates a plain validation stamp, and the
+// configuration is sent as null.
 func TestValidationStampSetupPlain(t *testing.T) {
 	request := fakeYontrack(t, `{"data": {"setupValidationStamp": {"errors": []}}}`)
 	cmd := cmdWithArgs(t, validationStampSetupCmd,
@@ -37,9 +81,11 @@ func TestValidationStampSetupPlain(t *testing.T) {
 
 	require.NoError(t, cmd.RunE(cmd, nil))
 
-	assert.Contains(t, (*request)["query"], "dataTypeConfig: null")
+	assert.Contains(t, (*request)["query"], "dataTypeConfig: $dataTypeConfig")
 	variables := (*request)["variables"].(map[string]interface{})
 	assert.Equal(t, "new", variables["validation"])
+	assert.Contains(t, variables, "dataTypeConfig")
+	assert.Nil(t, variables["dataTypeConfig"])
 }
 
 // A validation stamp Yontrack rejects fails the command, with Yontrack's message.
