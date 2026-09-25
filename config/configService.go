@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -77,6 +76,15 @@ func ReadRootConfiguration() (*RootConfig, error) {
 	return &root, err
 }
 
+// Writes the configuration back to the file it was read from
+func saveRootConfiguration(root *RootConfig) error {
+	buf, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(getConfigFilePath(), buf, 0600)
+}
+
 // Adds a new configuration and set as default
 func AddConfiguration(config Config, override bool) error {
 	root, err := ReadRootConfiguration()
@@ -107,13 +115,7 @@ func AddConfiguration(config Config, override bool) error {
 		Configurations: configurations,
 	}
 	// Saves the root configuration back
-	configFilePath := getConfigFilePath()
-	buf, _ := yaml.Marshal(newRoot)
-	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
-	_ = ioutil.WriteFile(configFilePath, buf, 0600)
-
-	// OK
-	return nil
+	return saveRootConfiguration(&newRoot)
 }
 
 // Finds an existing configuration
@@ -150,13 +152,7 @@ func SetSelectedConfiguration(name string) error {
 		Configurations: root.Configurations,
 	}
 	// Saves the root configuration back
-	configFilePath := getConfigFilePath()
-	buf, _ := yaml.Marshal(newRoot)
-	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
-	_ = os.WriteFile(configFilePath, buf, 0600)
-
-	// OK
-	return nil
+	return saveRootConfiguration(&newRoot)
 }
 
 // Disables or enabled a configuration
@@ -173,13 +169,7 @@ func SetConfigurationState(name string, disabled bool) error {
 	existing.Disabled = disabled
 	replaceConfigurationByName(root, existing)
 	// Saves the root configuration back
-	configFilePath := getConfigFilePath()
-	buf, _ := yaml.Marshal(root)
-	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
-	_ = os.WriteFile(configFilePath, buf, 0600)
-
-	// OK
-	return nil
+	return saveRootConfiguration(root)
 }
 
 // Deletes an existing configuration
@@ -209,13 +199,7 @@ func DeleteConfiguration(name string) error {
 		Configurations: configurations,
 	}
 	// Saves the root configuration back
-	configFilePath := getConfigFilePath()
-	buf, _ := yaml.Marshal(newRoot)
-	_, _ = os.OpenFile(configFilePath, os.O_CREATE|os.O_WRONLY, 0600)
-	_ = os.WriteFile(configFilePath, buf, 0600)
-
-	// OK
-	return nil
+	return saveRootConfiguration(&newRoot)
 }
 
 // Name of the configuration file, in the working directory or in the home directory
