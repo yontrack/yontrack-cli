@@ -9,7 +9,7 @@ This is `yontrack`, a CLI tool written in Go for feeding data into [Yontrack](ht
 - **Language:** Go
 - **CLI framework:** [Cobra](https://github.com/spf13/cobra) (`github.com/spf13/cobra`)
 - **HTTP client:** go-resty (`github.com/go-resty/resty/v2`)
-- **Config:** Viper + YAML (`~/.yontrack-config.yaml`)
+- **Config:** YAML, looked up in `config.getConfigFilePath()`: `--config`, then `$YONTRACK_CONFIG`, then `./.yontrack-config.yaml` if it exists, then `~/.yontrack-config.yaml` if it exists, else `./.yontrack-config.yaml`
 - **GraphQL schema:** `ontrack.graphql` — the full schema of the Ontrack server (reference for available queries/mutations)
 
 ## Project structure
