@@ -50,6 +50,11 @@ jobs:
       - name: Homebrew formula tests
         run: ./homebrew_formula_test.sh
 
+      # tag.yml uses it to tell a 5.x patch from the latest release, which is
+      # only exercised for real when such a tag is pushed.
+      - name: Release line tests
+        run: ./release_line_test.sh
+
       - if: ${{ github.event_name != 'pull_request' }}
         name: Yontrack setup
         run: |
