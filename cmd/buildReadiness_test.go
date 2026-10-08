@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -132,7 +133,7 @@ func TestBuildReadinessExitCodes(t *testing.T) {
 				// Neither an error nor the usage: the output tells why
 				assert.Empty(t, stderr)
 			} else {
-				assert.Contains(t, stderr, c.stderr)
+				assert.Equal(t, 1, strings.Count(stderr, c.stderr), "the error is printed once: %s", stderr)
 			}
 		})
 	}

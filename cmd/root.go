@@ -76,13 +76,18 @@ Examples of usages:
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
+//
+// Cobra has already printed the error, and the usage when it is about the
+// flags or the arguments: Execute only sets the exit code.
 func Execute() {
 	err := rootCmd.Execute()
 	var exit *exitCodeError
 	if errors.As(err, &exit) {
 		os.Exit(exit.code)
 	}
-	cobra.CheckErr(err)
+	if err != nil {
+		os.Exit(1)
+	}
 }
 
 // exitCodeError ends the CLI with an exit code of its own, rather than the 1

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	config "yontrack/config"
 
@@ -64,6 +65,33 @@ func runCLI(t *testing.T, args ...string) (code int, stdout string, stderr strin
 	}
 	require.NoError(t, err)
 	return 0, out.String(), errOut.String()
+}
+
+// A failing command prints its error once and exits with 1. Cobra prints the
+// usage after the error, but for an unknown command, which gets a hint to
+// --help instead.
+func TestCLIErrors(t *testing.T) {
+	fakeYontrackRoutes(t, map[string]string{"readiness(": `{"errors": [{"message": "Promotion level not found: GOLD"}]}`})
+	cases := []struct {
+		name  string
+		args  []string
+		err   string
+		usage bool
+	}{
+		{"command error", append([]string{"build", "readiness", "--promotion", "GOLD"}, readinessArgs...), "Promotion level not found: GOLD", true},
+		{"unknown flag", []string{"build", "readiness", "--unknown"}, "Error: unknown flag: --unknown", true},
+		{"unknown command", []string{"unknown"}, `Error: unknown command "unknown" for "yontrack"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			code, _, stderr := runCLI(t, c.args...)
+
+			assert.Equal(t, 1, code)
+			assert.Equal(t, 1, strings.Count(stderr, "Error:"), "the error is printed once: %s", stderr)
+			assert.Contains(t, stderr, c.err)
+			assert.Equal(t, c.usage, strings.Contains(stderr, "Usage:"), "usage: %s", stderr)
+		})
+	}
 }
 
 // TestCLIProcess is the process runCLI starts: it runs the CLI, and nothing
