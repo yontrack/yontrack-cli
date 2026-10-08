@@ -10,17 +10,68 @@ Yontrack, and the Homebrew formula is bumped in the tap.
 So the whole job is: **pick the right version, check the changelog will read
 well, push the tag.**
 
+## Release lines
+
+There are two, and the branch decides which one a tag belongs to:
+
+| Line | Branch | What it gets |
+|------|--------|--------------|
+| 6.x  | `main` | everything: features, enhancements, fixes |
+| 5.x  | `v5`   | patches only, `5.9.1`, `5.9.2`… |
+
+`main` is the CLI for Yontrack 6. Commands that exist in 5.x keep working
+against a 5.x server; the new ones fail there with the server's GraphQL error.
+Nothing checks the server version at run time.
+
+**Patching 5.x.** A fix lands on `main` first, like any issue. If 5.x needs it
+too, the issue carries `backport: 5.x`, and its commit is cherry-picked:
+
+```bash
+git checkout v5
+git pull --ff-only
+git cherry-pick -x <commit-on-main>
+git push origin v5
+```
+
+`-x` notes the original commit; the subject keeps its `#N`, so the changelog
+and `release-issues` still find the issue. Once `Go` is green on `v5`, tag it
+from `v5` (step 4). Never merge `v5` into `main`, or `main` into `v5`.
+
+**What a 5.x patch does not do.** `tag.yml` places each tag among the others
+with [`release_line.sh`](release_line.sh). A tag that is not the highest
+`MAJOR.MINOR.PATCH`, which is every 5.x patch once `6.0.0` exists:
+
+- is published, with its changelog and binaries, but **not as GitHub's latest
+  release**, which `install.sh` follows;
+- **does not touch the Homebrew tap**, which has a single formula: bumping it
+  would move brew users back to 5.x. No bottles are built for it either.
+
+5.x users install a patch with the installer and an explicit version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yontrack/yontrack-cli/main/install.sh | VERSION=5.9.1 sh
+```
+
+Any tag that is not `MAJOR.MINOR.PATCH` fails the release in its first step.
+
 ## 1. Pick the version
 
 Tags are plain `MAJOR.MINOR.PATCH`, no `v` prefix — `5.1.1`, `5.2.0`.
 
-Look at what has landed since the last tag:
+Look at what has landed since the last tag of the line (see *Release lines*):
 
 ```bash
 git fetch --tags
+# 6.x, from main
 LAST=$(git tag -l --sort=-v:refname | head -1)
-git log --oneline "$LAST"..main
+git log --oneline "$LAST"..origin/main
+# 5.x, from v5
+LAST=$(git tag -l '5.*' --sort=-v:refname | head -1)
+git log --oneline "$LAST"..origin/v5
 ```
+
+A 5.x patch takes fixes only: anything else in the range of `v5` was
+cherry-picked by mistake.
 
 Every commit is expected to start with the issue it closes (`#46 Add ...`), so
 the issue labels decide the bump:
@@ -45,7 +96,7 @@ ask what a user would notice differently after upgrading.
 To read the labels of everything in the range:
 
 ```bash
-git log --format=%s "$LAST"..main \
+git log --format=%s "$LAST"..origin/main \
   | grep -oE '^#[0-9]+' | tr -d '#' | sort -u \
   | xargs -I{} gh issue view {} --json number,labels \
       --jq '"#\(.number) [\([.labels[].name] | join(", "))]"'
@@ -74,32 +125,37 @@ not harvested — `yontrack-cli#58`, or just "issue 58" in prose — and keep th
 issue the commit closes in the subject line where it belongs.
 
 
-The release body is produced by Yontrack, from the commits between the last
-build promoted to `RELEASE` and the one being released. To see it before
+The release body is produced by Yontrack, from the commits between the build of
+the previous tag, the highest `MAJOR.MINOR.PATCH` below the one being released,
+and the build being released. So `5.9.1` starts from `5.9.0`, and `6.0.0` from
+the highest 5.x tag. When the previous tag has no build in Yontrack, `tag.yml`
+warns and falls back to the last `RELEASE` build of the branch. To see it before
 committing to a tag, against a CLI already configured for the instance:
 
 ```bash
 yontrack build changelog export \
-  --from-promotion RELEASE \
+  --from <build-id of the previous tag> \
   --to <build-id> \
   --format markdown \
   --grouping "Features=feature|Enhancements=enhancement|Bugs=bug" \
   --alt-group "Other"
 ```
 
-`<build-id>` is the Yontrack build for the commit being released — the same
-lookup `tag.yml` does with `build search --commit`.
+Both ids are the Yontrack builds of the commits — the same lookup `tag.yml`
+does with `build search --commit <sha> --count 1 --display-id`.
 
 An empty or thin changelog almost always means commits did not reference their
 issues, not that nothing changed.
 
 ## 4. Push the tag
 
+From the branch of the line, `main` for 6.x or `v5` for a 5.x patch:
+
 ```bash
 git checkout main
 git pull --ff-only
-git tag 5.2.0
-git push origin 5.2.0
+git tag 6.1.0
+git push origin 6.1.0
 ```
 
 Then watch the release build:
@@ -116,13 +172,14 @@ For the record, so the manual steps above are not reinvented:
 1. Builds every platform binary via `go-executable-build.bash <version>`, and the `checksums.txt` the installer verifies against
 2. Configures the CLI against the Yontrack instance and finds the build for the
    tagged commit
-3. Exports the changelog since the last `RELEASE`-promoted build
+3. Exports the changelog since the build of the previous tag
 4. Creates the GitHub release, with that changelog as the body and the binaries
-   attached
+   attached; it is marked as the latest release only for the highest tag
 5. Validates `GITHUB.RELEASE` on the build and sets its `release` property
-6. Builds the Homebrew bottle for Apple Silicon, checks it, and uploads it to
-   the release ([`bottle.yml`](.github/workflows/bottle.yml))
-7. Renders the Homebrew formula with `homebrew_formula.sh` and pushes it to
+6. For the highest tag only (see *Release lines*), builds the Homebrew bottle
+   for Apple Silicon, checks it, and uploads it to the release
+   ([`bottle.yml`](.github/workflows/bottle.yml))
+7. For the highest tag only, renders the Homebrew formula with `homebrew_formula.sh` and pushes it to
    [`yontrack/homebrew-tap`](https://github.com/yontrack/homebrew-tap), which is
    what makes `brew install yontrack/tap/yontrack` offer the new version
 
