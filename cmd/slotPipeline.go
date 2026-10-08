@@ -34,6 +34,12 @@ var slotPipelineCmd = &cobra.Command{
 A pipeline is one deployment of one build into one slot:
 
     yontrack slot pipeline start --project my-project --environment production --build 1
+
+A running deployment which did not succeed is marked as failed:
+
+    yontrack slot pipeline fail --pipeline 2957ff78-... --message "Smoke tests failed"
+
+Both take --date, to record a deployment which happened in the past.
 `,
 }
 

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"yontrack/client"
 	config "yontrack/config"
+	"yontrack/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -59,6 +60,15 @@ warning on stderr listing the rules which are not met. To list the builds
 which are deployable:
 
     yontrack slot builds --project my-project --environment production
+
+To record a deployment which happened in the past, --date backdates the start of
+the pipeline (requires Yontrack 6.0):
+
+    yontrack slot pipeline start --project my-project --environment production --build 1 \
+        --date 2026-09-15T14:30:00Z
+
+It cannot be in the future, before the creation of the build, nor before the
+start of the slot's latest pipeline. A date/time without an offset is in UTC.
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return slotPipelineStart(cmd)
@@ -86,6 +96,10 @@ func slotPipelineStart(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	dateTime, err := utils.GetDateFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	if err := checkBuildSelector(name, version); err != nil {
 		return err
@@ -106,7 +120,7 @@ func slotPipelineStart(cmd *cobra.Command) error {
 		return err
 	}
 
-	pipeline, err := startSlotPipeline(cfg, found.Id, buildId)
+	pipeline, err := startSlotPipeline(cfg, found.Id, buildId, dateTime)
 	if err != nil {
 		return err
 	}
@@ -173,15 +187,20 @@ func notDeployableWarning(pipeline *startedSlotPipeline) string {
 
 // startSlotPipelineInput builds the StartSlotPipelineInput for the mutation.
 // buildId is an Int in the schema, so it is passed as a number and never as a string.
-func startSlotPipelineInput(slotId string, buildId int) map[string]interface{} {
-	return map[string]interface{}{
+// dateTime backdates the start of the pipeline; "" leaves it to Yontrack, which takes now.
+func startSlotPipelineInput(slotId string, buildId int, dateTime string) map[string]interface{} {
+	input := map[string]interface{}{
 		"slotId":  slotId,
 		"buildId": buildId,
 	}
+	if dateTime != "" {
+		input["dateTime"] = dateTime
+	}
+	return input
 }
 
 // startSlotPipeline starts a pipeline for the build on the slot, and returns it.
-func startSlotPipeline(cfg *config.Config, slotId string, buildId int) (*startedSlotPipeline, error) {
+func startSlotPipeline(cfg *config.Config, slotId string, buildId int, dateTime string) (*startedSlotPipeline, error) {
 	var data struct {
 		StartSlotPipeline struct {
 			Pipeline *startedSlotPipeline
@@ -216,7 +235,7 @@ func startSlotPipeline(cfg *config.Config, slotId string, buildId int) (*started
 			}
 		}
 	`, map[string]interface{}{
-		"input": startSlotPipelineInput(slotId, buildId),
+		"input": startSlotPipelineInput(slotId, buildId, dateTime),
 	}, &data); err != nil {
 		return nil, err
 	}
@@ -241,6 +260,7 @@ func init() {
 	slotPipelineStartCmd.Flags().StringP("build", "b", "", "Name of the build to deploy")
 	slotPipelineStartCmd.Flags().StringP("version", "v", "", "Version (release property) of the build to deploy")
 	slotPipelineStartCmd.Flags().StringP("output", "o", "id", "How to display the pipeline (id, json, env)")
+	slotPipelineStartCmd.Flags().String("date", "", "Date/time the pipeline started, to backdate it (2006-01-02T15:04:05Z07:00, UTC when no offset is given)")
 
 	_ = slotPipelineStartCmd.MarkFlagRequired("project")
 	_ = slotPipelineStartCmd.MarkFlagRequired("environment")

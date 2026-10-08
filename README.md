@@ -964,6 +964,40 @@ Pipeline #3 created as a candidate — not deployable yet:
   - promotion: Build not promoted
 ```
 
+## Failing a deployment
+
+> This command requires Yontrack 6.0, unlike the rest of this CLI. Against Yontrack 5.x, it fails
+> with Yontrack's own error.
+
+A running deployment which did not succeed - its smoke tests failed, for example - is marked as failed, using the ID printed by `slot pipeline start`:
+
+```bash
+yontrack slot pipeline fail --pipeline 2957ff78-... --message "Smoke tests failed"
+```
+
+`--message` is optional. Without `--pipeline`, the ID is taken from `YONTRACK_PIPELINE_ID`, which `slot pipeline start --output env` exports, so that a later step of the same job does not have to pass it around:
+
+```bash
+eval "$(yontrack slot pipeline start --project my-project --environment production --build 42 --output env)"
+# ... deploy, run the smoke tests ...
+yontrack slot pipeline fail --message "Smoke tests failed"
+```
+
+Only a running deployment can fail - a candidate which never started is cancelled instead - and the command fails if the pipeline is not running. A failed deployment does not change what the slot runs: its last deployed build is still the one of its last successful deployment.
+
+## Backdating a deployment
+
+> `--date` requires Yontrack 6.0.
+
+To record a deployment which happened in the past - when importing a history, for example - `--date` sets the time of the action instead of the current time, on both `slot pipeline start` and `slot pipeline fail`:
+
+```bash
+yontrack slot pipeline start --project my-project --environment production --build 42 --date 2026-09-15T14:30:00Z
+yontrack slot pipeline fail --pipeline 2957ff78-... --date 2026-09-15T14:45:00Z
+```
+
+The date is given as `2026-09-15T14:30:00+02:00`, as `2026-09-15T14:30:00` - in UTC - or as `2026-09-15` - midnight UTC. Yontrack refuses a date in the future, before the creation of the build, before the previous change of the pipeline, or - for a start - before the start of the slot's latest pipeline.
+
 # Misc
 
 ## Direct GraphQL calls

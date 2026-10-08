@@ -2,8 +2,10 @@ package utils
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -67,6 +69,22 @@ func GetBuildFlag(cmd *cobra.Command) (string, error) {
 	}
 }
 
+// GetPipelineFlag reads the ID of a slot pipeline, from --pipeline or else from
+// YONTRACK_PIPELINE_ID, which 'slot pipeline start --output env' exports.
+func GetPipelineFlag(cmd *cobra.Command) (string, error) {
+	pipeline, err := cmd.Flags().GetString("pipeline")
+	if err != nil {
+		return "", err
+	}
+	if pipeline == "" {
+		pipeline = os.Getenv("YONTRACK_PIPELINE_ID")
+	}
+	if pipeline == "" {
+		return "", errors.New("pipeline is required (use --pipeline flag or YONTRACK_PIPELINE_ID environment variable)")
+	}
+	return pipeline, nil
+}
+
 func GetBuildIdFromEnv() (int, error) {
 	buildIdStr := os.Getenv("YONTRACK_BUILD_ID")
 	if buildIdStr == "" {
@@ -89,4 +107,31 @@ func GetProjectBranchBuildFlags(cmd *cobra.Command, ignoreEmptyBranch bool, norm
 		return "", "", "", err
 	}
 	return project, branch, build, nil
+}
+
+// dateFlagLayouts are the formats accepted by --date. A date/time without an
+// offset is taken as UTC, as Yontrack does.
+var dateFlagLayouts = []string{
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02",
+}
+
+// GetDateFlag reads --date, the date/time an action is backdated to, and
+// returns it as Yontrack expects a LocalDateTime: in UTC, without an offset.
+// It is "" when --date is not set, so that Yontrack takes the current time.
+func GetDateFlag(cmd *cobra.Command) (string, error) {
+	value, err := cmd.Flags().GetString("date")
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return "", nil
+	}
+	for _, layout := range dateFlagLayouts {
+		if date, err := time.Parse(layout, value); err == nil {
+			return date.UTC().Format("2006-01-02T15:04:05"), nil
+		}
+	}
+	return "", fmt.Errorf("invalid --date %s: expected 2006-01-02, 2006-01-02T15:04:05 (UTC) or 2006-01-02T15:04:05Z07:00", value)
 }

@@ -63,11 +63,20 @@ func TestCheckBuildSelector(t *testing.T) {
 // buildId is an Int in StartSlotPipelineInput. Passing it as a string is
 // rejected by the server, so it has to stay a number all the way through.
 func TestStartSlotPipelineInput(t *testing.T) {
-	input := startSlotPipelineInput("slot-1", 11407)
+	input := startSlotPipelineInput("slot-1", 11407, "")
 
 	assert.Equal(t, "slot-1", input["slotId"])
 	assert.Equal(t, 11407, input["buildId"])
 	assert.IsType(t, 0, input["buildId"])
+	// Not backdated: Yontrack takes the current time.
+	assert.NotContains(t, input, "dateTime")
+}
+
+// --date backdates the start of the pipeline.
+func TestStartSlotPipelineInput_Backdated(t *testing.T) {
+	input := startSlotPipelineInput("slot-1", 11407, "2026-09-15T14:30:00")
+
+	assert.Equal(t, "2026-09-15T14:30:00", input["dateTime"])
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -144,7 +153,7 @@ func TestStartSlotPipelineReadsRunAction(t *testing.T) {
 	cfg, err := config.GetSelectedConfiguration()
 	require.NoError(t, err)
 
-	pipeline, err := startSlotPipeline(cfg, "slot-1", 11407)
+	pipeline, err := startSlotPipeline(cfg, "slot-1", 11407, "")
 
 	require.NoError(t, err)
 	query := (*request)["query"].(string)
@@ -211,4 +220,71 @@ func TestSlotBuildsNoSlot(t *testing.T) {
 	cmd := cmdWithArgs(t, slotBuildsCmd, "--project", "my-project", "--environment", "production")
 
 	assert.EqualError(t, cmd.RunE(cmd, nil), "no slot for project my-project in environment production")
+}
+
+// slotPipelineFailInput is what 'slot pipeline fail' sent to failSlotPipeline.
+func slotPipelineFailInput(t *testing.T, request *map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	assert.Contains(t, (*request)["query"].(string), "failSlotPipeline")
+	variables := (*request)["variables"].(map[string]interface{})
+	return variables["input"].(map[string]interface{})
+}
+
+func TestSlotPipelineFail(t *testing.T) {
+	request := fakeYontrack(t, `{"data": {"failSlotPipeline": {"failStatus": {"ok": true, "message": "Smoke tests failed"}, "errors": []}}}`)
+	cmd := cmdWithArgs(t, slotPipelineFailCmd,
+		"--pipeline", "p1", "--message", "Smoke tests failed", "--date", "2026-09-15T14:30:00+02:00")
+
+	require.NoError(t, cmd.RunE(cmd, nil))
+
+	assert.Equal(t, map[string]interface{}{
+		"pipelineId": "p1",
+		"message":    "Smoke tests failed",
+		"dateTime":   "2026-09-15T12:30:00",
+	}, slotPipelineFailInput(t, request))
+}
+
+// Yontrack refuses to fail a pipeline which is not running through the status
+// of the action, not through the errors: the command must fail all the same.
+func TestSlotPipelineFail_NotRunning(t *testing.T) {
+	fakeYontrack(t, `{"data": {"failSlotPipeline": {"failStatus": {"ok": false, "message": "Only a running deployment can be marked as failed."}, "errors": []}}}`)
+	cmd := cmdWithArgs(t, slotPipelineFailCmd, "--pipeline", "p1")
+
+	assert.EqualError(t, cmd.RunE(cmd, nil), "Only a running deployment can be marked as failed.")
+}
+
+func TestSlotPipelineFail_Error(t *testing.T) {
+	fakeYontrack(t, `{"data": {"failSlotPipeline": {"failStatus": null, "errors": [{"message": "Date/time cannot be in the future."}]}}}`)
+	cmd := cmdWithArgs(t, slotPipelineFailCmd, "--pipeline", "p1")
+
+	assert.EqualError(t, cmd.RunE(cmd, nil), "1) Date/time cannot be in the future.\n")
+}
+
+// No status and no error means nothing was done, whatever the HTTP status said.
+func TestSlotPipelineFail_NoStatus(t *testing.T) {
+	fakeYontrack(t, `{"data": {"failSlotPipeline": {"failStatus": null, "errors": []}}}`)
+	cmd := cmdWithArgs(t, slotPipelineFailCmd, "--pipeline", "p1")
+
+	assert.EqualError(t, cmd.RunE(cmd, nil), "the pipeline was not marked as failed, and no error was reported either")
+}
+
+// After 'slot pipeline start --output env', the pipeline needs no flag. Without
+// --message or --date, nothing is sent for them: Yontrack takes its default
+// message and the current time, and an empty date/time would not parse.
+func TestSlotPipelineFail_Defaults(t *testing.T) {
+	t.Setenv("YONTRACK_PIPELINE_ID", "p1")
+	request := fakeYontrack(t, `{"data": {"failSlotPipeline": {"failStatus": {"ok": true, "message": "Deployment failed"}, "errors": []}}}`)
+	cmd := cmdWithArgs(t, slotPipelineFailCmd)
+
+	require.NoError(t, cmd.RunE(cmd, nil))
+
+	assert.Equal(t, map[string]interface{}{"pipelineId": "p1"}, slotPipelineFailInput(t, request))
+}
+
+// A refusal without a reason still fails, and says what was refused.
+func TestSlotPipelineFail_RefusedWithoutMessage(t *testing.T) {
+	fakeYontrack(t, `{"data": {"failSlotPipeline": {"failStatus": {"ok": null, "message": ""}, "errors": []}}}`)
+	cmd := cmdWithArgs(t, slotPipelineFailCmd, "--pipeline", "p1")
+
+	assert.EqualError(t, cmd.RunE(cmd, nil), "the pipeline was not marked as failed")
 }
