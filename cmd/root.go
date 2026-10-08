@@ -22,6 +22,8 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"errors"
+	"os"
 	"yontrack/config"
 
 	"github.com/spf13/cobra"
@@ -75,7 +77,34 @@ Examples of usages:
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	cobra.CheckErr(rootCmd.Execute())
+	err := rootCmd.Execute()
+	var exit *exitCodeError
+	if errors.As(err, &exit) {
+		os.Exit(exit.code)
+	}
+	cobra.CheckErr(err)
+}
+
+// exitCodeError ends the CLI with an exit code of its own, rather than the 1
+// of any error, and without printing anything more: the command has already
+// said why.
+type exitCodeError struct {
+	code   int
+	reason string
+}
+
+func (e *exitCodeError) Error() string {
+	return e.reason
+}
+
+// exitWith returns the error which ends the CLI with code, cobra printing
+// neither the error nor the usage. It is for an outcome which is not an
+// error, but which a script must be able to tell, like a build which is not
+// ready.
+func exitWith(cmd *cobra.Command, code int, reason string) error {
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	return &exitCodeError{code: code, reason: reason}
 }
 
 func init() {

@@ -1098,6 +1098,77 @@ export YONTRACK_AGENT_SESSION_LINK=https://claude.ai/code/session_01J9Z3...
 
 When set, every request carries them, as the `X-Yontrack-Agent-Session` and `X-Yontrack-Agent-Session-Link` headers. They are not in the configuration file, since a session lasts one run. Yontrack ignores them unless the token belongs to an agent, and drops a link which is not `https`.
 
+## Context commands
+
+Four questions an agent - or a pipeline - asks before acting. The answers are the same as in the Yontrack UI and its MCP server. Each command prints text by default, and the result of Yontrack's GraphQL API with `--output json`.
+
+### Is a build ready?
+
+What a build still lacks to reach a promotion level of its branch, or to be deployed in a slot of its project:
+
+```bash
+yontrack build readiness --project my-project --branch main --build 42 --promotion GOLD
+yontrack build readiness --project my-project --branch main --build 42 --slot b6b8a2c1-...
+```
+
+Exactly one of `--promotion` and `--slot` is required. Reading the readiness promotes or deploys nothing. The command prints `ready`, or `not ready` followed by one line per missing condition - its kind, its name and why it is missing:
+
+```
+not ready
+  - VALIDATION tests: The tests validation has not passed.
+  - MANUAL GOLD: GOLD is granted by a person.
+```
+
+The kind is one of `VALIDATION`, `PROMOTION`, `CHECK`, `ADMISSION_RULE`, `MANUAL` and `AGENT_POLICY`, and says what can be done about it.
+
+The exit code tells a pipeline whether to wait or to fix itself:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Ready |
+| `2` | Not ready: wait, or act on what is missing |
+| `1` | Any error, like an unknown build or promotion level |
+
+### What would deploying a build change?
+
+The commits between the build a slot last deployed - its last deployment which completed - and a candidate build:
+
+```bash
+yontrack build changelog since-deployed --project my-project --branch main --build 45 --slot b6b8a2c1-...
+```
+
+```
+a1b2c3d Fix the login (Jane Doe) [Claude Code: CO_AUTHOR, SESSION_TRAILER]
+f6e5d4c Bump the version (John Doe)
+```
+
+Each line is a commit: its short ID, its subject, its author, and the assistants - the agents - which helped write it, with the markers which named them. The command fails when nothing was deployed in the slot yet. [`slot get`](#getting-a-slot) gives the ID of a slot.
+
+### What is deployed where?
+
+The slots of a project, in the order of the environments, and what each one runs:
+
+```bash
+yontrack slot list --project my-project
+```
+
+```
+dev             slot-1  1.2.4
+staging         slot-2  1.2.3
+staging     eu  slot-4  1.2.2
+production      slot-3  —
+```
+
+The columns are the environment, the qualifier of the slot - empty for the default one -, the slot ID, and the display name of the build it last deployed, or `—` when it never completed a deployment.
+
+### Which builds of a dependency are at a level?
+
+No new command: [`build search`](#searching-for-builds) answers it already. For example, the last 5 builds of `my-library` promoted to `GOLD`:
+
+```bash
+yontrack build search --project my-library --with-promotion GOLD --count 5
+```
+
 # Misc
 
 ## Direct GraphQL calls
