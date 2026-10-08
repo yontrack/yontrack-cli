@@ -11,8 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      latest: ${{ steps.version.outputs.latest }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Every tag, to place this one among them (release_line.sh).
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -21,11 +25,15 @@ jobs:
           # drifted to 1.21.1 while go.mod had moved to 1.22.
           go-version-file: go.mod
 
+      # `previous` and `latest` place the tag among the release lines, since a
+      # 5.x patch can be cut after 6.0.0. See RELEASING.md, "Release lines".
       - id: version
         name: Get version
         run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          git tag -l | ./release_line.sh "${VERSION}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Build packages
         run: |
@@ -56,10 +64,30 @@ jobs:
           echo YONTRACK_BRANCH_NAME=$YONTRACK_BRANCH_NAME
           echo YONTRACK_BUILD_NAME=$YONTRACK_BUILD_NAME
 
-      - name: Change log since last release
+      # From the previous tag's build, not from the last RELEASE build: that
+      # one is looked up on the tagged build's branch, and the first patch on
+      # v5 would find none there, or one from years ago.
+      - name: Change log since the previous release
+        env:
+          PREVIOUS: ${{ steps.version.outputs.previous }}
         run: |
+          FROM_BUILD_ID=""
+          if [ -n "$PREVIOUS" ]; then
+            FROM_BUILD_ID=$(./yontrack build search \
+              --project ${{ github.event.repository.name }} \
+              --commit "$(git rev-parse "${PREVIOUS}^{commit}")" \
+              --count 1 \
+              --display-id)
+          fi
+          if [ -n "$FROM_BUILD_ID" ]; then
+            FROM="--from $FROM_BUILD_ID"
+          else
+            echo "::warning::No Yontrack build for the previous tag '${PREVIOUS}', so the change log starts from the last RELEASE build of the branch."
+            FROM="--from-promotion RELEASE"
+          fi
+          # shellcheck disable=SC2086 # FROM is two words on purpose
           ./yontrack build changelog export \
-            --from-promotion RELEASE \
+            $FROM \
             --to $YONTRACK_BUILD_ID \
             --format markdown \
             --grouping "Features=feature|Enhancements=enhancement|Bugs=bug" \
@@ -71,6 +99,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body_path: .yontrack.log.md
+          # install.sh follows /releases/latest: a 5.x patch cut after 6.0.0
+          # must not become it.
+          make_latest: ${{ steps.version.outputs.latest }}
           files: |
             yontrack-*
             checksums.txt
@@ -85,9 +116,12 @@ jobs:
   # Split out of the release job because the formula names the bottles, and
   # the bottles are built by installing the formula -- so the release has to
   # be published, then bottled, and only then can the tap be told about it.
+  #
+  # Like the tap, only for the highest version: see below.
   bottles:
     name: Bottles
     needs: release
+    if: ${{ needs.release.outputs.latest == 'true' }}
     uses: ./.github/workflows/bottle.yml
     with:
       version: ${{ needs.release.outputs.version }}
@@ -106,7 +140,11 @@ jobs:
     #
     # `!cancelled()` rather than `always()`: cancelling a release run is how
     # a wrong tag gets stopped, and `always()` would push its formula anyway.
-    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    #
+    # Only for the highest version: the tap has one formula, and a 5.x patch
+    # cut after 6.0.0 would move brew users back to 5.x. RELEASING.md says how
+    # 5.x users install a patch instead.
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.latest == 'true' }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.release.outputs.version }}

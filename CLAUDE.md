@@ -113,6 +113,10 @@ The version is chosen from the labels of the issues since the last tag: a
 `feature` or `enhancement` makes it a minor, `bug` alone makes it a patch. A new
 command or a new flag is additive and still a minor.
 
+There are two release lines: 6.x on `main`, and 5.x patches on `v5`, which
+only get fixes cherry-picked from `main` (`backport: 5.x`). Issues always land
+on `main`.
+
 **Read [RELEASING.md](RELEASING.md) before cutting one** - it carries the label
 check that keeps issues out of the changelog's `Other` group, and how to preview
 the changelog before committing to a tag.
