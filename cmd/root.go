@@ -86,4 +86,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&config.ConfigFilePath, "config", "", "Configuration file path. When not set: $YONTRACK_CONFIG if set, else ./.yontrack-config.yaml if it exists, else ~/.yontrack-config.yaml if it exists, else ./.yontrack-config.yaml.")
 
 	rootCmd.PersistentFlags().BoolVar(&config.GraphQLLogging, "graphql-log", false, "Enable traces on the GraphQL calls.")
+
+	rootCmd.PersistentFlags().StringVar(&config.AgentSession, "agent-session", "", "ID of the agent session behind this run, sent to Yontrack with every request (defaults to YONTRACK_AGENT_SESSION). Read only for the token of an agent.")
+	rootCmd.PersistentFlags().StringVar(&config.AgentSessionLink, "agent-session-link", "", "Link (https) to the agent session behind this run, sent to Yontrack with every request (defaults to YONTRACK_AGENT_SESSION_LINK). Read only for the token of an agent.")
 }

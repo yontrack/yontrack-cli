@@ -69,8 +69,8 @@ func GraphQLCall(cfg *config.Config, query string, variables map[string]interfac
 	return nil
 }
 
-// newClient is the HTTP client of the calls to Yontrack: its authentication
-// and its retries.
+// newClient is the HTTP client of the calls to Yontrack: its authentication,
+// the agent session and its retries.
 func newClient(cfg *config.Config) *resty.Client {
 	client := resty.New()
 	client.SetDebug(config.GraphQLLogging)
@@ -78,6 +78,16 @@ func newClient(cfg *config.Config) *resty.Client {
 		client.SetHeader("X-Ontrack-Token", cfg.Token)
 	} else if cfg.Username != "" {
 		client.SetBasicAuth(cfg.Username, cfg.Password)
+	}
+
+	// Sent whatever the token: Yontrack reads them only for the token of an
+	// agent, and drops a link which is not https.
+	session, link := config.GetAgentSession()
+	if session != "" {
+		client.SetHeader("X-Yontrack-Agent-Session", session)
+	}
+	if link != "" {
+		client.SetHeader("X-Yontrack-Agent-Session-Link", link)
 	}
 
 	if cfg.ConnectionRetry.MaxCount != 0 {

@@ -1074,6 +1074,30 @@ and exits with a non-zero code when the chain is broken or an endorsement is inv
 * a _partial_ trail, opened by `trail.opened` on a build which predates its trail - the trail starts at seq 1 on the time of that entry;
 * entries written while the instance key was not provisioned, which have no endorsement - the `Unendorsed` line gives the first of them.
 
+# Agents
+
+> These features require Yontrack 6.0.
+
+Yontrack 6.0 knows about coding agents: an agent has its own token, owned by a person, and what it does is recorded as done by that agent.
+
+## Agent session
+
+An agent running the CLI tells Yontrack which of its sessions is behind the run, so that what it records links back to that session:
+
+```bash
+yontrack --agent-session 01J9Z3... --agent-session-link https://claude.ai/code/session_01J9Z3... \
+    validate --project my-project --branch main --build 42 --validation tests --status PASSED
+```
+
+or, for every command of the run, through the environment:
+
+```bash
+export YONTRACK_AGENT_SESSION=01J9Z3...
+export YONTRACK_AGENT_SESSION_LINK=https://claude.ai/code/session_01J9Z3...
+```
+
+When set, every request carries them, as the `X-Yontrack-Agent-Session` and `X-Yontrack-Agent-Session-Link` headers. They are not in the configuration file, since a session lasts one run. Yontrack ignores them unless the token belongs to an agent, and drops a link which is not `https`.
+
 # Misc
 
 ## Direct GraphQL calls

@@ -54,15 +54,60 @@ func fakeYontrackWithEvidence(t *testing.T, response string, evidenceStatus int,
 		_, _ = w.Write([]byte(response))
 	}))
 	t.Cleanup(server.Close)
+	pointConfigurationAt(t, server.URL)
+	return &request, &uploads
+}
 
+// pointConfigurationAt points the CLI configuration at a fake Yontrack for the
+// duration of the test.
+func pointConfigurationAt(t *testing.T, url string) {
+	t.Helper()
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(configFile, []byte(
-		"selected: test\nconfigurations:\n  - name: test\n    url: "+server.URL+"\n"), 0o600))
+		"selected: test\nconfigurations:\n  - name: test\n    url: "+url+"\n"), 0o600))
 	previous := config.ConfigFilePath
 	config.ConfigFilePath = configFile
 	t.Cleanup(func() { config.ConfigFilePath = previous })
+}
 
-	return &request, &uploads
+// graphQLRequest is a GraphQL request received by the fake Yontrack.
+type graphQLRequest struct {
+	Query     string
+	Variables map[string]interface{}
+	Header    http.Header
+}
+
+// fakeYontrackRoutes answers each GraphQL request with the response whose key
+// its query contains - exactly one must - and records every request, headers
+// included, in their order. It is for the commands which send several
+// requests.
+func fakeYontrackRoutes(t *testing.T, routes map[string]string) *[]graphQLRequest {
+	t.Helper()
+	var requests []graphQLRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Query     string
+			Variables map[string]interface{}
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		requests = append(requests, graphQLRequest{Query: body.Query, Variables: body.Variables, Header: r.Header.Clone()})
+		var matches []string
+		for key, response := range routes {
+			if strings.Contains(body.Query, key) {
+				matches = append(matches, response)
+			}
+		}
+		if len(matches) != 1 {
+			t.Errorf("%d routes match the query, expected 1:\n%s", len(matches), body.Query)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(matches[0]))
+	}))
+	t.Cleanup(server.Close)
+	pointConfigurationAt(t, server.URL)
+	return &requests
 }
 
 func readEvidenceUpload(t *testing.T, r *http.Request) evidenceUpload {
