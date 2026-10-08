@@ -70,6 +70,27 @@ interface ProjectEntity {
 union BuildPromotionInfoItemData = PromotionLevel | PromotionRun
 
 type Account {
+  "For an agent, what it did: its events, newest first, on the projects the caller can see (the events without a project for the administrators only). Only the owner of the agent and the administrators read it; anybody else is refused. Empty for a person. A page holds at most 100 events. There is no total count: `pageInfo.nextPage` tells whether there are more events. The events follow the retention of the events. Requires the Agent governance licence (`extension.agents`)."
+  agentActivity(
+    "IDs of the event types to keep - empty or absent for all the types"
+    eventTypes: [String!],
+    "Events at or after this time (UTC, inclusive)"
+    from: LocalDateTime,
+    "Offset for the page"
+    offset: Int = 0,
+    "Name of a project, matching the event's project or its extra project"
+    project: String,
+    "Size of the page"
+    size: Int = 20,
+    "Events at or before this time (UTC, inclusive)"
+    to: LocalDateTime
+  ): EventAgentActivityPaginated
+  "For an agent, its optional description"
+  agentDescription: String
+  "For an agent, the tool behind it (Claude Code, Codex, Copilot, Devin, ...)"
+  agentTool: String
+  "Agents owned by this account. Only visible to the account itself and to administrators."
+  agents: [Account!]!
   "List of authorized projects"
   authorizedProjects: [AuthorizedProject!]!
   "Email of the account"
@@ -81,8 +102,10 @@ type Account {
   "List of groups the account belongs to"
   groups: [AccountGroup!]!
   id: ID!
-  "Unique name for the account"
-  name: String! @deprecated(reason : "Will be removed in V6. Use email instead. Replaced by email.")
+  "Kind of the account: a person or a registered agent"
+  kind: AccountKind!
+  "For an agent, the person accountable for it - only its ID, full name and email. Null for a person."
+  owner: Account
   "Security role (admin or none)"
   role: String
   "List of authentication tokens linked to this account."
@@ -109,11 +132,200 @@ type AddSlotWorkflowPayload implements Payload {
   slotWorkflow: SlotWorkflow
 }
 
+"How much of the delivery the agents drive, over a window of days, across the projects the current user can see."
+type AgentActivityStats {
+  "Builds created in the window whose assisted change has at least one assistant"
+  assistedBuilds: Int!
+  "Share of the known builds which are assisted, between 0 and 1 - null when no build created in the window is known"
+  assistedShare: Float
+  "Builds created by agents in the window: `new_build` events whose actor is an agent"
+  builds: Int!
+  "Deployment actions by agents in the window: the slot pipelines started, starting their deployment or deployed (`slot-pipeline-creation`, `slot-pipeline-deploying` and `slot-pipeline-deployed` events) whose actor is an agent"
+  deployments: Int!
+  "Start of the window (UTC)"
+  from: LocalDateTime!
+  "Builds created in the window whose assisted change is known - computed by Yontrack or set by the CI. The denominator of the assisted share."
+  knownBuilds: Int!
+  "Promotions by agents in the window: `new_promotion_run` events whose actor is an agent"
+  promotions: Int!
+  "Builds created in the window whose assisted change is unknown - excluded from the assisted share"
+  unknownBuilds: Int!
+  "Number of days of the window, ending now"
+  window: Int!
+}
+
+"What the current agent may do on a project: the rights of its owner, narrowed by the agent policy. Read it before acting rather than discovering the policy by being refused."
+type AgentPolicy {
+  "True when the agent may create builds and validation runs on the project"
+  canRecordEvidence: Boolean!
+  "Full name of the owner of the agent: the person to ask when the policy stops the agent"
+  owner: String!
+  "Promotion levels of the enabled branches of the project which admit agents, and on which the owner of the agent may promote. Empty when the owner may not promote."
+  promotionLevels(
+    "Name of a branch, to restrict the levels to this branch"
+    branch: String
+  ): [AgentPolicyPromotionLevel!]!
+  "Slots of the project which admit agents, and where the owner of the agent may start a deployment pipeline, each one saying whether a manual approval will still stop the agent"
+  slots: [AgentPolicySlot!]!
+}
+
+"A promotion level which admits agents, and on which the owner of the agent may promote"
+type AgentPolicyPromotionLevel {
+  "Name of the branch of the promotion level"
+  branch: String!
+  "ID of the promotion level"
+  id: Int!
+  "Name of the promotion level"
+  name: String!
+}
+
+"A slot which admits agents, and where the owner of the agent may start a deployment pipeline"
+type AgentPolicySlot {
+  "Name of the environment of the slot"
+  environment: String!
+  "ID of the slot"
+  id: String!
+  "True when the slot has a manual approval rule: the agent may start a pipeline, but a person must approve it - an agent never approves"
+  manualApproval: Boolean!
+  "Qualifier of the slot, empty for the default slot of the project in the environment"
+  qualifier: String!
+}
+
 type ApplyDashboardsPayload implements PayloadInterface {
   "Dashboards that were created or updated"
   dashboards: [Dashboard!]!
   "List of errors"
   errors: [PayloadUserError]
+}
+
+"Assisted change of a build: whether the commits since the previous build on its branch were written with assistants (agent kinds). The build is assisted when the list of assistants is not empty."
+type AssistedChange {
+  "Distinct names of the assistants, sorted. The build is assisted when there is at least one."
+  assistants: [String!]!
+  "The build is assisted: there is at least one assistant."
+  assisted: Boolean!
+  "Number of commits written with an assistant."
+  assistedCommits: Int
+  "How the value was obtained: COMPUTED by Yontrack from the change log, SET_BY_CI, or UNKNOWN when it could not be computed."
+  basis: AssistedChangeBasis!
+  "Build the change log was computed from, if any, and if it still exists."
+  previousBuild: Build
+  "ID of the build the change log was computed from, if any."
+  previousBuildId: Int
+  "Distinct links to the agent sessions behind the commits, at most 20."
+  sessionLinks: [String!]!
+  "Number of commits in the change of the build."
+  totalCommits: Int
+  "Why the value is unknown, when the basis is UNKNOWN: no SCM, no previous build with a commit, or the SCM error."
+  unknownReason: String
+}
+
+"Endorsement of an entry by the instance key: the Ed25519 signature of its hash"
+type AuditTrailEndorsement {
+  "Technical ID of the endorsed entry"
+  entryId: Int!
+  "ID of the key which endorsed the entry"
+  keyId: String!
+  "Seq of the endorsed entry"
+  seq: Int!
+  "Signature of the hash of the entry, in base64"
+  signature: String!
+  "Server time of the endorsement: ISO-8601 in UTC with milliseconds"
+  time: String!
+}
+
+"An entry of the trail of a build"
+type AuditTrailEntry {
+  "Who made the change"
+  actor: JSON!
+  "Hash of the entry: SHA-256 of the canonical form of its envelope, in lowercase hex"
+  hash: String!
+  "Technical ID of the entry"
+  id: Int!
+  "What changed"
+  payload: JSON!
+  "Hash of the entry before, null for seq 1"
+  prevHash: String
+  "Schema version of the entry, which selects its hash format"
+  schemaVersion: Int!
+  "Position of the entry in the trail, from 1"
+  seq: Int!
+  "Server time of the entry, as hashed: ISO-8601 in UTC with milliseconds"
+  time: String!
+  "Type of the entry, like build.created or validation.run"
+  type: String!
+}
+
+"Public key of the instance, with which the endorsements of the entries of its trails are verified"
+type AuditTrailKey {
+  "Algorithm of the key: Ed25519"
+  algorithm: String!
+  "ID of the key, named by every endorsement it made: the first 16 hex characters of the SHA-256 of the DER SubjectPublicKeyInfo"
+  keyId: String!
+  "Public key, in PEM"
+  publicKey: String!
+}
+
+"Status of the audit trail"
+type AuditTrailStatus {
+  "Whether the instance key can endorse the entries"
+  keyStatus: AuditTrailKeyStatus!
+  "Public keys of the instance - empty while no key exists"
+  keys: [AuditTrailKey!]!
+  "Whether the licence allows the audit trail"
+  licensed: Boolean!
+  "Status of the evidence storage"
+  storage: AuditTrailStorageStatus!
+}
+
+"Status and configuration of the evidence storage - never its credentials"
+type AuditTrailStorageStatus {
+  "Configured bucket"
+  bucket: String
+  "When the storage was last probed, UTC, ISO-8601 local date time"
+  checkedAt: String!
+  "Configured endpoint"
+  endpoint: String
+  "Why the storage is not OK - null when it is"
+  message: String
+  "Whether the bucket is addressed path-style"
+  pathStyle: Boolean!
+  "Configured region"
+  region: String!
+  "State of the storage, as its last probe found it"
+  state: AuditTrailStorageState!
+}
+
+"Verification of the trail of a build"
+type AuditTrailVerification {
+  "Positions of the evidence.attached entries whose evidence no longer has the recorded digest - null unless the evidence was verified"
+  alteredEvidence: [Int!]
+  "Whether every hash recomputes from its entry, every entry is chained to the one before it, and the seqs run from 1 without gap"
+  chainIntact: Boolean!
+  "Whether every endorsement is the signature of the hash of its entry by a known public key of the instance"
+  endorsementsValid: Boolean!
+  "Position, from 1, of the first entry failing a check of the chain - the trail is verified up to the one before it. Null when the chain is intact."
+  firstBrokenSeq: Int
+  "Position of the first entry with an invalid endorsement, null when they are all valid"
+  firstInvalidEndorsementSeq: Int
+  "Positions of the evidence.attached entries whose evidence is absent from the storage - null unless the evidence was verified"
+  missingEvidence: [Int!]
+  "Whether the trail opens with trail.opened: its build predates it, and the trail starts at seq 1"
+  partial: Boolean!
+  "Every check which failed, by position"
+  problems: [AuditTrailVerificationProblem!]!
+  "Position of the first entry of the unendorsed tail of the trail - the entries after the last endorsed one, which no endorsement covers. Null when the last entry is endorsed or the trail is empty."
+  unendorsedFromSeq: Int
+}
+
+"A check of the verification of a trail which failed"
+type AuditTrailVerificationProblem {
+  "What failed, for a human"
+  message: String!
+  "Position of the entry, from 1 - its seq, unless the seqs themselves are wrong"
+  seq: Int!
+  "What failed"
+  type: TrailVerificationProblemType!
 }
 
 "A named authorization"
@@ -133,12 +345,60 @@ type AuthorizedProject {
   role: ProjectRole!
 }
 
+"Current conditions of the auto promotion of a promotion level, and their current state for a given build."
+type AutoPromotionBuildConditions {
+  "Is the promotion revoked when one of its prerequisites is no longer valid?"
+  autoRevoke: Boolean
+  "Regular expression excluding validation stamps by name - empty when not set"
+  exclude: String!
+  "Regular expression including validation stamps by name - empty when not set"
+  include: String!
+  "State of each required promotion level for the build, in branch order"
+  promotionLevels: [AutoPromotionPromotionLevelCondition!]!
+  "State of each required validation stamp for the build, in branch order"
+  validationStamps: [AutoPromotionValidationStampCondition!]!
+}
+
+"Current conditions of the auto promotion of a promotion level: the validation stamps and promotion levels it requires, as they are resolved on the branch today."
+type AutoPromotionConditions {
+  "Is the promotion revoked when one of its prerequisites is no longer valid?"
+  autoRevoke: Boolean
+  "Regular expression excluding validation stamps by name - empty when not set"
+  exclude: String!
+  "Regular expression including validation stamps by name - empty when not set"
+  include: String!
+  "Promotion levels required for the promotion, in branch order"
+  promotionLevels: [PromotionLevel!]!
+  "Validation stamps required for the promotion, in branch order: the ones named explicitly, plus the ones of the branch matching the include expression and not the exclude one."
+  validationStamps: [ValidationStamp!]!
+}
+
+"State of a promotion level required by an auto promotion, for a build"
+type AutoPromotionPromotionLevelCondition {
+  "Required promotion level"
+  promotionLevel: PromotionLevel!
+  "Latest run of the promotion level for the build - null when it is not granted"
+  promotionRun: PromotionRun
+}
+
+"State of a validation stamp required by an auto promotion, for a build"
+type AutoPromotionValidationStampCondition {
+  "Latest run of the validation stamp for the build - null when it never ran"
+  lastRun: ValidationRun
+  "Does the latest run count as passed for the auto promotion?"
+  passed: Boolean
+  "Required validation stamp"
+  validationStamp: ValidationStamp!
+}
+
 "Audit entry for an auto versioning processing order."
 type AutoVersioningAuditEntry {
   "History of the different states"
   audit: [AutoVersioningAuditEntryState!]!
   "Elapsed time between the creation of this process and its last state (in ms)"
   duration: Int
+  "Automatic retries & manual reschedules this entry is part of"
+  lineage: AutoVersioningAuditEntryLineage!
   "Most recent state"
   mostRecentState: AutoVersioningAuditEntryState!
   "Associated auto versioning order"
@@ -155,6 +415,28 @@ type AutoVersioningAuditEntry {
   running: Boolean
   "Actual SCM branch being used"
   upgradeBranch: String
+}
+
+"Retries & reschedules an auto-versioning audit entry is part of"
+type AutoVersioningAuditEntryLineage {
+  "Maximum number of automatic retries currently configured, 0 when disabled"
+  configuredRetryMaxCount: Int!
+  "UUIDs of the entries rescheduling this one manually"
+  rescheduledAs: [String!]!
+  "If this entry was rescheduled manually, UUID of the entry it reschedules"
+  rescheduledFrom: String
+  "If this entry has been retried automatically, time its retry is scheduled at"
+  retryAt: LocalDateTime
+  "If this entry is an automatic retry, its attempt number, starting at 1"
+  retryAttempt: Int
+  "If this entry is an automatic retry, the maximum number of automatic retries when it was created"
+  retryMax: Int
+  "If this entry is an automatic retry, UUID of the entry it retries"
+  retryOf: String
+  "If this entry is an automatic retry, UUID of the first entry of the chain of retries"
+  retryOriginal: String
+  "If this entry has been retried automatically, UUID of its retry"
+  retryUuid: String
 }
 
 type AutoVersioningAuditEntryPaginated {
@@ -261,8 +543,6 @@ type AutoVersioningOrder {
   sourcePromotion: String
   "Target path(s) for the processing order"
   targetPath: String!
-  "Target path(s) for the processing order"
-  targetPaths: String @deprecated(reason : "Deprecated, use `targetPath`")
   "Property in the target file"
   targetProperty: String
   "Regex used in property value to identify the version"
@@ -363,12 +643,6 @@ type AutoVersioningSourceConfigPath {
   versionSource: String
 }
 
-"Describes the history of an auto-versioning decision process"
-type AutoVersioningTrail {
-  "Trails per branch"
-  branches: [AutoVersioningBranchTrail!]!
-}
-
 type Branch implements Authorizable & ProjectEntity {
   "Description with links."
   annotatedDescription: String
@@ -432,6 +706,8 @@ type Branch implements Authorizable & ProjectEntity {
   ): [BranchLink!]!
   "Is this branch a favourite of the current user?"
   favourite: Boolean
+  "Summary of the security findings of the branch: its open findings by severity, and the number of its accepted and resolved ones. Null for a user who is not granted the view of the findings of the project."
+  findingsSummary: BranchFindingsSummary
   "Git branch"
   gitBranchConfigurationProperty: Property
   "Registered GitHub ingestion configuration"
@@ -505,6 +781,20 @@ type Branch implements Authorizable & ProjectEntity {
   workflowInstances: [WorkflowInstance!]!
 }
 
+"Summary of the security findings of a branch: its open findings by severity, and the number of its accepted and resolved ones. The state of a finding on a branch rolls up its exposure for all the validation stamps of the branch, as the filter of the findings on a branch does. Every count is by maximum severity."
+type BranchFindingsSummary {
+  "Number of findings accepted on this branch"
+  acceptedCount: Int!
+  "Whether a finding has ever been exposed on this branch, resolved or not. A scan which reports nothing leaves no exposure."
+  hasExposures: Boolean!
+  "Findings open on this branch ? exposed there for one of its validation stamps at least ? by maximum severity, every severity present, the most severe first"
+  open: [FindingSeverityCount!]!
+  "Number of findings open on this branch"
+  openCount: Int!
+  "Number of findings resolved on this branch"
+  resolvedCount: Int!
+}
+
 "Information about a branch"
 type BranchInfo {
   "Associated branch"
@@ -538,10 +828,28 @@ type BranchLink {
 }
 
 type Build implements Authorizable & ProjectEntity {
+  "What the agents did on this build: its events (validations, promotions, links...) whose actor is an agent, newest first. Visible to anyone who can see the build. A page holds at most 100 events. There is no total count: `pageInfo.nextPage` tells whether there are more events. An event touching a project the user cannot see is left out. The events follow the retention of the events."
+  agentActions(
+    "Offset for the page"
+    offset: Int = 0,
+    "Size of the page"
+    size: Int = 20
+  ): EventAgentActionPaginated
   "Description with links."
   annotatedDescription: String
+  "Assisted change of the build: whether its commits since the previous build on its branch were written with assistants. Null when it has been neither computed nor set yet, which counts as unknown."
+  assistedChange: AssistedChange
+  "Whether the commits of the build since the previous build on its branch were written with assistants (agent kinds): computed by Yontrack from the change log, or set by the CI."
+  assistedChangeProperty: Property
+  "Trail of the build: its entries, their endorsements and its verification - null when the build has no trail, the licence being off"
+  auditTrail: BuildAuditTrail
   "Authorizations for this context"
   authorizations: [Authorization!]!
+  "Current conditions of the auto promotion of a promotion level of this build's branch, with their current state for this build, whether it is promoted to this level or not - null when the promotion level has no auto promotion"
+  autoPromotionConditions(
+    "ID of the promotion level, which must belong to the build's branch"
+    promotionLevelId: Int!
+  ): AutoPromotionBuildConditions
   "Auto versioning information for this build, in regards of a parent branch"
   autoVersioning(
     "ID of the parent branch. Is overridden by the buildId argument, but at least one of each is required."
@@ -557,6 +865,8 @@ type Build implements Authorizable & ProjectEntity {
   buildBitbucketPipelineRunProperty: Property
   "Link to the GitHub Workflow Run which created this build."
   buildGitHubWorkflowRunProperty: Property
+  "Link to the GitLab CI/CD pipeline which created this build."
+  buildGitLabPipelineRunProperty: Property
   creation: Signature
   "Gets the list of slots where this build is actually deployed"
   currentDeployments(
@@ -580,6 +890,8 @@ type Build implements Authorizable & ProjectEntity {
   information: [EntityInformation!]!
   "Link to a Jenkins Build"
   jenkinsBuildProperty: Property
+  "State of this build in every slot of its project, in environment order"
+  journey: [BuildSlotJourney!]!
   "List of links."
   linkProperty: Property
   "Associates an arbitrary message (and its type) to an entity. Will be displayed as a decorator in the UI."
@@ -609,6 +921,13 @@ type Build implements Authorizable & ProjectEntity {
     "Fully qualified name of the property type"
     type: String
   ): [Property!]!
+  "What this build still lacks to reach a promotion level of its branch, or to be deployed in a slot of its project - exactly one of `promotionLevel` and `slotId` must be given. Every missing condition is listed: the validations and promotions required by an auto promotion, the promotion checks, the admission rules of a slot, and what needs a person. A build which already has the promotion level is ready. Computed now from the current state, and read-only: reading it promotes or deploys nothing."
+  readiness(
+    "Name of a promotion level of the build's branch"
+    promotionLevel: String,
+    "ID of a slot of the build's project"
+    slotId: String
+  ): Readiness!
   "Release indicator on the build."
   releaseProperty: Property
   "Renders a template for this build"
@@ -703,6 +1022,21 @@ type Build implements Authorizable & ProjectEntity {
   workflowInstances: [WorkflowInstance!]!
 }
 
+"Trail of a build: the append-only, hash-chained record of its story"
+type BuildAuditTrail {
+  "Endorsements of the entries, by seq - none for the entries written while the instance key was not provisioned"
+  endorsements: [AuditTrailEndorsement!]!
+  "Entries of the trail, by seq"
+  entries: [AuditTrailEntry!]!
+  "Evidences of every validation run of the build, deleted ones included, in the order of their upload"
+  evidence: [Evidence!]!
+  "Verification of the trail: its chain, its endorsements and, on demand, its evidence"
+  verification(
+    "Whether to check the evidence the trail references too"
+    includeEvidence: Boolean = false
+  ): AuditTrailVerification!
+}
+
 "Gathering information about the auto versioning around this build"
 type BuildAutoVersioning {
   "AV source config"
@@ -787,6 +1121,18 @@ type BuildPromotionInfoItem {
   promotionLevel: PromotionLevel
 }
 
+"Where one build stands in one slot of its project"
+type BuildSlotJourney {
+  "Admission rules of the slot refusing this build. Empty unless the state is NOT_ELIGIBLE."
+  nonEligibleRules: [SlotAdmissionRuleConfig!]!
+  "pipeline field"
+  pipeline: SlotPipeline
+  "slot field"
+  slot: Slot!
+  "Where the build stands in this slot"
+  state: BuildSlotJourneyState!
+}
+
 "Output type for the bulkUpdatePromotionLevelById mutation."
 type BulkUpdatePromotionLevelByIdPayload implements Payload {
   "List of errors"
@@ -863,52 +1209,6 @@ type CleanupAutoVersioningAuditEntriesPayload implements Payload {
 type CollectedConnectorStatus {
   status: ConnectorStatus!
   time: String!
-}
-
-"Definition of an attribute for a configurable indicator"
-type ConfigurableIndicatorAttribute {
-  "Identifier for this attribute, used for storage"
-  key: String!
-  "Display name for this attribute"
-  name: String!
-  "True is the attribute is required"
-  required: Boolean
-  "Type of the value"
-  type: ConfigurableIndicatorAttributeType!
-}
-
-"Value for a state"
-type ConfigurableIndicatorAttributeValue {
-  "Attribute definition"
-  definition: ConfigurableIndicatorAttribute!
-  "Attribute key"
-  key: String!
-  "Attribute value"
-  value: String
-}
-
-"Stored state for a configurable indicator"
-type ConfigurableIndicatorState {
-  "Is this indicator enabled?"
-  enabled: Boolean
-  "Link to a description for this indicator"
-  link: String
-  "List of attribute values for this indicator"
-  values: [ConfigurableIndicatorAttributeValue!]!
-}
-
-"Configurable indicator and its state"
-type ConfigurableIndicatorTypeState {
-  "List of attributes for this type"
-  attributes: [ConfigurableIndicatorAttribute!]!
-  "Associated category"
-  category: IndicatorComputedCategory!
-  "Indicator type ID"
-  id: String
-  "Indicator type name"
-  name: String
-  "Saved stated for this configurable indicator"
-  state: ConfigurableIndicatorState
 }
 
 "Generic configuration"
@@ -1028,6 +1328,14 @@ type CreateEnvironmentPayload implements Payload {
   environment: Environment
   "List of errors"
   errors: [UserError]
+}
+
+"Output type for the createEstate mutation."
+type CreateEstatePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Created estate"
+  estate: Estate
 }
 
 "Output type for the createGitHubConfiguration mutation."
@@ -1211,6 +1519,12 @@ type DeleteAccountPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the deleteAgent mutation."
+type DeleteAgentPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
 "Output type for the deleteAutoVersioningConfig mutation."
 type DeleteAutoVersioningConfigPayload implements Payload {
   "List of errors"
@@ -1287,6 +1601,22 @@ type DeleteBranchReleaseValidationPropertyPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the deleteBuildAssistedChangePropertyById mutation."
+type DeleteBuildAssistedChangePropertyByIdPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteBuildAssistedChangeProperty mutation."
+type DeleteBuildAssistedChangePropertyPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
 "Output type for the deleteBuildBitbucketPipelineRunPropertyById mutation."
 type DeleteBuildBitbucketPipelineRunPropertyByIdPayload implements Payload {
   "Build updated"
@@ -1325,6 +1655,22 @@ type DeleteBuildGitCommitPropertyByIdPayload implements Payload {
 
 "Output type for the deleteBuildGitCommitProperty mutation."
 type DeleteBuildGitCommitPropertyPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteBuildGitLabPipelineRunPropertyById mutation."
+type DeleteBuildGitLabPipelineRunPropertyByIdPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteBuildGitLabPipelineRunProperty mutation."
+type DeleteBuildGitLabPipelineRunPropertyPayload implements Payload {
   "Build updated"
   build: Build
   "List of errors"
@@ -1401,6 +1747,20 @@ type DeleteDeploymentPayload implements Payload {
 type DeleteEnvironmentPayload implements Payload {
   "List of errors"
   errors: [UserError]
+}
+
+"Output type for the deleteEstate mutation."
+type DeleteEstatePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the deleteEvidence mutation."
+type DeleteEvidencePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Deleted evidence"
+  evidence: Evidence
 }
 
 "Output type for the deleteGenericProperty mutation."
@@ -1649,6 +2009,38 @@ type DeleteProjectStalePropertyPayload implements Payload {
   project: Project
 }
 
+"Output type for the deletePromotionLevelAgentsAdmittedPropertyById mutation."
+type DeletePromotionLevelAgentsAdmittedPropertyByIdPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
+"Output type for the deletePromotionLevelAgentsAdmittedProperty mutation."
+type DeletePromotionLevelAgentsAdmittedPropertyPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
+"Output type for the deletePromotionLevelAssistedBuildsRequirePropertyById mutation."
+type DeletePromotionLevelAssistedBuildsRequirePropertyByIdPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
+"Output type for the deletePromotionLevelAssistedBuildsRequireProperty mutation."
+type DeletePromotionLevelAssistedBuildsRequirePropertyPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
 "Output type for the deletePromotionLevelAutoPromotionPropertyById mutation."
 type DeletePromotionLevelAutoPromotionPropertyByIdPayload implements Payload {
   "List of errors"
@@ -1841,6 +2233,22 @@ type DeleteValidationStampMetaInfoPropertyPayload implements Payload {
   validationStamp: ValidationStamp
 }
 
+"Output type for the deleteValidationStampNonAgentEvidencePropertyById mutation."
+type DeleteValidationStampNonAgentEvidencePropertyByIdPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Validation stamp updated"
+  validationStamp: ValidationStamp
+}
+
+"Output type for the deleteValidationStampNonAgentEvidenceProperty mutation."
+type DeleteValidationStampNonAgentEvidencePropertyPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Validation stamp updated"
+  validationStamp: ValidationStamp
+}
+
 "Output type for the deleteWebhook mutation."
 type DeleteWebhookPayload implements Payload {
   "List of errors"
@@ -1940,14 +2348,28 @@ type EditAccountPayload implements Payload {
   errors: [UserError]
 }
 
-"Association of a slot with its eligibility"
+"Association of a slot with the eligibility and deployability of a build"
 type EligibleSlot {
-  "eligible field"
+  "Whether the build is eligible and can be deployed now: it passes every admission rule which can be decided on the build alone. A pipeline started for an eligible but not deployable build waits as a candidate."
+  deployable: Boolean
+  "Whether the build could go to this slot - a pipeline can be started for it, as a candidate."
   eligible: Boolean
+  "Admission rules of the slot which prevent this eligible build from being deployed now, with their reasons. Empty when the build is deployable, or not eligible at all."
+  nonDeployableRules: [EligibleSlotRuleCheck!]!
   "Admission rules of the slot which refuse this build. Empty when the build is eligible."
   nonEligibleRules: [SlotAdmissionRuleConfig!]!
+  "Admission rules of the slot which can only be decided once a pipeline exists for the build (like a manual approval). They do not count against deployable."
+  pipelineOnlyRules: [SlotAdmissionRuleConfig!]!
   "slot field"
   slot: Slot!
+}
+
+"Admission rule of a slot which prevents a build from being deployed now"
+type EligibleSlotRuleCheck {
+  "Why the rule prevents the deployment"
+  reason: String
+  "The admission rule"
+  rule: SlotAdmissionRuleConfig!
 }
 
 "Output type for the enableBranch mutation."
@@ -2023,6 +2445,177 @@ type Environment {
   tags: [String!]!
 }
 
+"One page of the project x environment matrix"
+type EnvironmentMatrix {
+  "Columns of the matrix, by environment order. Only the environments having at least one slot among the rows of this page."
+  environments: [Environment!]!
+  "Does the current user have any favourite project at all? The matrix opens on Favourites, and on All for a user who has never starred anything."
+  hasFavourites: Boolean!
+  "Index of the first project of this page"
+  offset: Int!
+  "Rows of the matrix, by project name"
+  projects: [EnvironmentMatrixProject!]!
+  "Number of projects asked for in this page"
+  size: Int!
+  "Total number of projects matching the filter, before per-project visibility is applied"
+  totalProjects: Int!
+}
+
+"One project of the matrix, with one row per qualifier"
+type EnvironmentMatrixProject {
+  "The project"
+  project: Project!
+  "Rows for this project, the default (empty) qualifier first. A project with only the default qualifier has exactly one row, which is the project's own row."
+  rows: [EnvironmentMatrixRow!]!
+}
+
+"One row of the matrix: a project and a qualifier, across the environments"
+type EnvironmentMatrixRow {
+  "Qualifier of this row, the empty string being the default one"
+  qualifier: String!
+  "Slots of this row, by environment order. Only the slots which exist: an environment with no slot for this project and qualifier is simply absent."
+  slots: [Slot!]!
+}
+
+"A group of projects selected by labels, every one of them required, and read together, with the marker and the targets its projects are read against."
+type Estate {
+  "Description of the estate"
+  description: String
+  "Security findings having the given external ID (a CVE, a rule ID) among the projects of the estate, by project name: the fan-out of one finding over the estate. Only the projects the user can see, and whose findings the user is granted the view of, are searched."
+  findings(
+    "External ID of the findings"
+    externalId: String!
+  ): [Finding!]!
+  "ID of the estate"
+  id: Int!
+  "Labels selecting the projects of the estate, all of them required"
+  labels: [Label!]!
+  "Marker the delivery readings of the estate are read up to. Null for the default marker: the highest-ordered environment where the project owns a slot, else the last promotion level of each branch."
+  marker: EstateMarker
+  "Unique name of the estate"
+  name: String!
+  "Readings of the projects of the estate in its set, one set per project, by project name, among the projects the user can see. A project whose readings have not been computed yet has its set, empty."
+  projectSets: [ScorecardSet!]!
+  "Projects the estate selects, the ones carrying all its labels, among the ones the user can see"
+  projects: [Project!]!
+  "Security findings open in at least one project of the estate, one per external ID, ranked by the number of projects of the estate in which they are open, then by severity, the highest first, then by external ID: which finding hurts the most projects. A finding is open in a project as its state says, on the branches which count only. Only the projects the user can see, and whose findings the user is granted the view of, are counted."
+  rankedFindings(
+    "Maximum number of findings to return, at most 100"
+    size: Int = 20
+  ): [RankedFinding!]!
+  "Window override and target of the readings which have one, by reading key"
+  readingConfigs: [EstateReadingConfig!]!
+  "Security findings of the projects of the estate whose external ID contains the given text, ignoring case, one per external ID, open, accepted or resolved, ranked as the rankedFindings are: by the number of projects of the estate in which they are open, then by severity, the highest first, then by external ID. A blank text finds nothing. Only the projects the user can see, and whose findings the user is granted the view of, are searched."
+  searchedFindings(
+    "Maximum number of findings to return, at most 100"
+    size: Int = 20,
+    "Text the external IDs contain, ignoring case"
+    text: String!
+  ): [RankedFinding!]!
+  "What the estate expects of the security scans of its projects"
+  security: EstateSecurity!
+}
+
+"Marker an estate names for its delivery readings"
+type EstateMarker {
+  "For an ENVIRONMENT marker, name of the environment"
+  environment: String
+  "Kind of marker"
+  kind: MarkerKind!
+  "For a PROMOTION marker, name of the promotion level, read on each branch which has one"
+  levelName: String
+  "For an ENVIRONMENT marker, qualifier of the slots read, empty for the default one"
+  qualifier: String
+}
+
+"Window override and target of one reading in an estate"
+type EstateReadingConfig {
+  "Which way the reading is better, and so how the target judges it"
+  direction: ReadingDirection
+  "Key of the reading, like delivery.leadTime"
+  key: String!
+  "Threshold the reading is judged against, in the unit of the reading (seconds for durations, per week for frequencies, 0 to 100 for rates), null for none"
+  target: Float
+  "Number of days the reading is taken over, null for the window of the settings"
+  windowDays: Int
+}
+
+"What an estate expects of the security scans of its projects"
+type EstateSecurity {
+  "Number of days a CRITICAL finding may stay open, null for no target"
+  criticalTargetDays: Int
+  "Kinds of scan every project must have run, each fresher than the freshness, to be covered. Empty: any fresh scan covers a project."
+  expectedKinds: [FindingKind!]!
+  "Number of days a scan stays fresh, null for the freshness of the settings"
+  freshnessDays: Int
+  "Number of days a HIGH finding may stay open, null for no target"
+  highTargetDays: Int
+}
+
+"Record of something that happened to a project entity, or to the instance, with its type, its time, its user, the entities it concerns and its values."
+type Event {
+  "Agent behind the event, null for a person"
+  actor: SignatureActor
+  "Entities the event is about"
+  entities: [EventEntity!]!
+  "Type of the event"
+  eventType: EventType!
+  "Additional entities the event is about, like the target of a build link"
+  extraEntities: [EventEntity!]!
+  "ID of the event"
+  id: Int!
+  "Message of the event, rendered as HTML"
+  message: String!
+  "Project of the event, if any"
+  project: Project
+  "Type of the entity the event refers to first, if any"
+  ref: ProjectEntityType
+  "Time of the event (UTC)"
+  time: LocalDateTime!
+  "Name of the user who posted the event"
+  user: String!
+  "Values of the event"
+  values: [NameValue!]!
+}
+
+type EventAgentActionPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [Event!]!
+}
+
+type EventAgentActionsPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [Event!]!
+}
+
+type EventAgentActivityPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [Event!]!
+}
+
+"Entity an event is about"
+type EventEntity {
+  "Display name of the entity, like `Branch P/X`"
+  displayName: String!
+  "ID of the entity"
+  id: Int!
+  "Type of the entity"
+  type: ProjectEntityType!
+}
+
+type EventPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [Event!]!
+}
+
 "EventSubscriptionPayload"
 type EventSubscriptionPayload {
   "Channel to send this event to"
@@ -2035,8 +2628,6 @@ type EventSubscriptionPayload {
   disabled: Boolean
   "List of events types to subscribe to"
   events: [String!]!
-  "Name of the subscription"
-  id: String @deprecated(reason : "Will be removed in V5. Use `name` instead.")
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
   "Unique name for this subscription"
@@ -2060,6 +2651,54 @@ type EventType {
   id: String!
 }
 
+"What the export of the events matching a filter would hold"
+type EventsExportInfo {
+  "Maximum number of events in an export"
+  maxRows: Int!
+  "Whether more events than `maxRows` match the filter: the export then holds the `maxRows` most recent ones only"
+  truncated: Boolean!
+}
+
+"A file attached to a validation run, referenced by an evidence.attached entry of the trail of its build"
+type Evidence {
+  "Server time of the upload, UTC"
+  collectedAt: LocalDateTime!
+  "Actor of the upload, as entries carry it"
+  collectedBy: JSON!
+  "When the evidence was deleted, null while it is not"
+  deletedAt: LocalDateTime
+  "Path of the download of the content, relative to the root of the API - null once the evidence is deleted"
+  downloadUrl: String
+  "SHA-256 the client claimed, which matched the computed one"
+  externalDigest: String
+  "Name of the file - a label, never a path"
+  fileName: String!
+  "ID of the evidence"
+  id: Int!
+  "Media type declared by the client - the download serves it as such only for the allow-listed types whose content agrees with it"
+  mediaType: String!
+  "SHA-256 of the content as the server computed it, in lowercase hexadecimal"
+  sha256: String!
+  "Size of the content, in bytes"
+  size: Long!
+  "Where the client says the evidence comes from"
+  source: EvidenceSource
+  "Validation run the evidence is attached to"
+  validationRun: ValidationRun!
+  "ID of the validation run the evidence is attached to"
+  validationRunId: Int!
+}
+
+"Where an evidence comes from, as its client claims it"
+type EvidenceSource {
+  "Tool which produced the evidence, like trivy"
+  tool: String
+  "Where the evidence was produced - a CI job, a report: an HTTP or HTTPS URL"
+  url: String
+  "Version of the tool"
+  version: String
+}
+
 type ExtensionFeatureDescription {
   "Feature description"
   description: String
@@ -2069,6 +2708,14 @@ type ExtensionFeatureDescription {
   name: String
   "Feature version"
   version: String
+}
+
+"Output type for the failSlotPipeline mutation."
+type FailSlotPipelinePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Status of the action"
+  failStatus: SlotDeploymentActionStatus
 }
 
 "Output type for the favouriteBranch mutation."
@@ -2087,12 +2734,279 @@ type FavouriteProjectPayload implements Payload {
   project: Project
 }
 
+"One known weakness (a vulnerability, a code issue, a secret, a DAST alert) at one location of one project, identified by its scanner, its external ID and its location."
+type Finding {
+  "Acceptance recorded by the most recent observation of the finding. Null when this observation carries none, or when all the observations have been purged."
+  acceptance: FindingAcceptance
+  "Exposure of the finding on the branches of its project, resolved or not, one entry per branch and validation stamp, by branch name then stamp name"
+  exposures: [FindingExposure!]!
+  "Identifier given by the scanner, like a CVE or a rule ID"
+  externalId: String!
+  "Time of the first observation"
+  firstSeen: LocalDateTime!
+  "Where and when the finding was first seen: the start of the earliest period of its exposures, with its branch, its stamp, its run and its build. Null when it has no exposure."
+  firstSeenIn: FindingSighting
+  "History of the finding, the most recent first: the start and the end of each period of its exposures, the changes of acceptance within them, and its observations, grouped between these."
+  history(
+    "Offset for the page"
+    offset: Int = 0,
+    "Size of the page"
+    size: Int = 20
+  ): FindingHistoryEntryPaginated
+  "Unique ID of the finding"
+  id: Int!
+  "Kind of scan which reported the finding"
+  kind: FindingKind!
+  "Time of the last observation"
+  lastSeen: LocalDateTime!
+  "Where the finding is, without any version. May be empty."
+  location: String!
+  "Maximum severity across the observations of the finding"
+  maxSeverity: FindingSeverity!
+  "Observations of the finding, the most recent first, optionally restricted to a branch, a validation stamp and a time range (both ends included)"
+  observations(
+    "ID of the branch of the observations"
+    branchId: Int,
+    "Earliest time of the observations"
+    from: LocalDateTime,
+    "Offset for the page"
+    offset: Int = 0,
+    "Size of the page"
+    size: Int = 20,
+    "Latest time of the observations"
+    to: LocalDateTime,
+    "ID of the validation stamp of the observations"
+    validationStampId: Int
+  ): FindingObservationPaginated
+  "Project the finding belongs to"
+  project: Project!
+  "Time the finding was resolved in its project, if it is"
+  resolvedAt: LocalDateTime
+  "Where and when the finding resolved in its project: the latest end of a period of its exposures on the branches which count, with its branch, its stamp, its run and its build. Null unless the finding is resolved in its project."
+  resolvedIn: FindingSighting
+  "Name of the scanner which reported the finding"
+  scanner: String!
+  "State of the finding in its project, rolled up from its exposure on the branches which count: the branches matched by the branch model of the project (all of them when it has none), the disabled branches left out. Evaluated when it is read, so that an acceptance past its expiry stops counting."
+  state: FindingState
+  "Short description of the finding"
+  title: String!
+  "Link to more information about the finding"
+  url: String
+}
+
+"Decision recorded outside Yontrack, read by it, that a security finding is tolerated, possibly until an expiry."
+type FindingAcceptance {
+  "Whether the acceptance holds today: it has no expiry, or its expiry is not past. Evaluated when it is read."
+  effective: Boolean!
+  "Last day the acceptance holds, as an ISO date (YYYY-MM-DD), if any"
+  expiresAt: String
+  "Where the decision is recorded, like a suppressions file"
+  source: String
+  "Why the finding is tolerated"
+  statement: String
+}
+
+"Stretch of a period of exposure during which the finding was reported under an acceptance holding on the day of each scan."
+type FindingAcceptedSpan {
+  "Acceptance of the first observation"
+  acceptance: FindingAcceptance!
+  "Time of the first observation under the acceptance"
+  from: LocalDateTime!
+  "Display name of the build of the first observation"
+  fromBuild: String
+  "Run of the first observation"
+  fromValidationRun: ValidationRun
+  "End of the stretch: the observation without the acceptance, the day after its last day, or the end of the period. Null while it holds."
+  to: LocalDateTime
+}
+
+"A security finding is exposed on a branch while the latest scan of the same stamp on that branch reports it."
+type FindingExposure {
+  "Last day this acceptance holds, as an ISO date (YYYY-MM-DD), if any"
+  acceptanceExpiresAt: String
+  "Whether the latest scan reported the finding under an acceptance holding on the day of the scan"
+  accepted: Boolean!
+  "Branch the finding is exposed on"
+  branch: Branch!
+  "Whether the branch counts toward the state of the finding in its project: matched by the branch model of the project (every branch when it has none, without SCM), and not disabled. A branch which does not count still exposes the finding."
+  counts: Boolean!
+  "Periods of the exposure, the oldest first: one per stretch from the first run which reported the finding to the first run which no longer did. A reopening starts a new period."
+  periods: [FindingExposurePeriod!]!
+  "Why the finding was resolved, if it is"
+  resolutionReason: FindingResolutionReason
+  "Time the finding was resolved on this branch for this stamp, if it is"
+  resolvedAt: LocalDateTime
+  "Time the current exposure started"
+  since: LocalDateTime!
+  "State of the exposure today: an acceptance past its expiry stops counting when it is read."
+  state: FindingExposureState!
+  "Validation stamp of the scans"
+  validationStamp: ValidationStamp!
+}
+
+"One continuous stretch of an exposure, from the first run which reported the finding to the first run which no longer did. An exposure has one or more periods; a reopening starts a new one."
+type FindingExposurePeriod {
+  "Stretches of the period during which the finding was reported under an acceptance, the oldest first"
+  acceptedSpans: [FindingAcceptedSpan!]!
+  "Duration of the period in seconds, until now while it is open. An accepted stretch counts as exposed."
+  durationSeconds: Long!
+  "Time of the run which ended the period, null while it is open"
+  endedAt: LocalDateTime
+  "Run which ended the period, the first one no longer reporting the finding. Null once its build is purged, or while the period is open."
+  endedBy: ValidationRun
+  "Display name of the build which ended the period, as for startedInBuild"
+  endedInBuild: String
+  "Whether the period is still open"
+  ongoing: Boolean!
+  "Why the period ended, if it did"
+  resolutionReason: FindingResolutionReason
+  "Time of the run which started the period"
+  startedAt: LocalDateTime!
+  "Run which started the period. Null once its build is purged, or for a period older than the periods themselves."
+  startedBy: ValidationRun
+  "Display name of the build which started the period: the one of the build while it exists, else the one kept when the period started. Null when unknown."
+  startedInBuild: String
+}
+
+"Entry in the history of a security finding: the start or the end of a period of exposure, a change of acceptance, or a group of observations between two of these."
+type FindingHistoryEntry {
+  "For an acceptance, or its expiry, the acceptance"
+  acceptance: FindingAcceptance
+  "Branch of the entry"
+  branch: Branch!
+  "Display name of the build of the run, or the one kept by the period. Null when unknown."
+  build: String
+  "For a group of observations, their number; 0 otherwise"
+  count: Int!
+  "For a group of observations, the display name of the build of the first one"
+  firstBuild: String
+  "For a group of observations, the time of the first one"
+  firstTime: LocalDateTime
+  "For a group of observations, the run of the first one"
+  firstValidationRun: ValidationRun
+  "For a group of observations, the display name of the build of the last one"
+  lastBuild: String
+  "For a group of observations, the time of the last one"
+  lastTime: LocalDateTime
+  "For a group of observations, the run of the last one"
+  lastValidationRun: ValidationRun
+  "For a resolution, its reason"
+  resolutionReason: FindingResolutionReason
+  "Time of the entry; for a group of observations, the time of the last one"
+  time: LocalDateTime!
+  "Type of the entry"
+  type: FindingHistoryEntryType!
+  "Run of the entry. Null once its build is purged, or for an entry no run made, like an expiry."
+  validationRun: ValidationRun
+  "Validation stamp of the scans"
+  validationStamp: ValidationStamp!
+}
+
+type FindingHistoryEntryPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [FindingHistoryEntry!]!
+}
+
+"One sighting of a security finding by one scan of one build."
+type FindingObservation {
+  "Acceptance of the finding at the time of the observation, if any"
+  acceptance: FindingAcceptance
+  "Observed finding"
+  finding: Finding!
+  "Version of the component fixing the finding, if any"
+  fixedVersion: String
+  "Version of the component in which the finding was observed"
+  installedVersion: String
+  "Severity as the scanner gave it, for provenance"
+  rawSeverity: String
+  "Severity asserted by the scanner in this observation"
+  severity: FindingSeverity!
+  "Time of the observation"
+  time: LocalDateTime!
+  "Validation run of the scan"
+  validationRun: ValidationRun!
+}
+
+type FindingObservationPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [FindingObservation!]!
+}
+
+type FindingPaginated {
+  "Information about the current page"
+  pageInfo: PageInfo
+  "Items in the current page"
+  pageItems: [Finding!]!
+}
+
+"Number of security findings having a given maximum severity"
+type FindingSeverityCount {
+  "Number of findings"
+  count: Int!
+  "Severity"
+  severity: FindingSeverity!
+}
+
+"Where and when a security finding was seen at a given moment, like its discovery or its resolution: branch, stamp, run and build."
+type FindingSighting {
+  "Branch of the run"
+  branch: Branch!
+  "Display name of the build of the run, null when unknown"
+  build: String
+  "Time of the run"
+  time: LocalDateTime!
+  "Run, null once its build is purged, or for a period older than the periods themselves"
+  validationRun: ValidationRun
+  "Validation stamp of the run"
+  validationStamp: ValidationStamp!
+}
+
+"Exposure of the security findings of a project on one branch"
+type FindingsBranchSummary {
+  "Branch"
+  branch: Branch!
+  "Whether this branch counts for the state of the findings of the project: matched by the branch model of the project, and not disabled"
+  counting: Boolean!
+  "Findings open on this branch ? exposed there for one of its validation stamps at least ? by maximum severity, every severity present, the most severe first"
+  open: [FindingSeverityCount!]!
+  "Number of findings open on this branch"
+  openCount: Int!
+}
+
+"Summary of the security findings of a project: its open findings by severity, and their exposure per branch. Every count is by maximum severity, as the filter of the findings is."
+type FindingsSummary {
+  "Number of accepted findings of the project"
+  acceptedCount: Int!
+  "Branches a finding has been exposed on, resolved or not, the most exposed first: by number of open critical findings, then of high ones, and so on, then by name"
+  branches: [FindingsBranchSummary!]!
+  "Open findings of the project by maximum severity, every severity present, the most severe first"
+  open: [FindingSeverityCount!]!
+  "Number of open findings of the project"
+  openCount: Int!
+  "Number of resolved findings of the project"
+  resolvedCount: Int!
+  "Names of the scanners which reported the findings of the project, sorted"
+  scanners: [String!]!
+}
+
 "Output type for the finishSlotPipelineDeployment mutation."
 type FinishSlotPipelineDeploymentPayload implements Payload {
   "List of errors"
   errors: [UserError]
   "Status of the deployment"
   finishStatus: SlotDeploymentActionStatus
+}
+
+"Output type for the generateAgentToken mutation."
+type GenerateAgentTokenPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Generated token, with its value"
+  token: Token
 }
 
 "Output type for the generateToken mutation."
@@ -2161,6 +3075,8 @@ type GitHubEngineConfiguration {
   url: String!
   "User used to connect to GitHub. Can be used with a password or an OAuth2 token. Not needed if using only the OAUth2 token or a GitHub App."
   user: String
+  "Whether to pass the id input to the dispatched workflows, to find their run when GitHub does not return it"
+  workflowSendId: Boolean
 }
 
 "Output type for the gitHubIngestionBuildLinksByBuildLabel mutation."
@@ -2444,270 +3360,10 @@ type HookRequest {
 
 "Data returned by a hook."
 type HookResponse {
-  "Additional information (non structured, will typically be rendered as JSON)"
-  info: JSON
   "Structured additional information"
   infoLink: HookInfoLink
   "Type of response"
   type: HookResponseType!
-}
-
-"Aggregator of indicator categories"
-type IndicatorCategories {
-  "List of indicator categories"
-  categories(
-    "ID of the indicator category"
-    id: String
-  ): [IndicatorCategory!]!
-}
-
-"Indicator category"
-type IndicatorCategory {
-  "Indicator category deprecation reason if any"
-  deprecated: String
-  "Indicator category ID"
-  id: String
-  "Indicator category name"
-  name: String
-  "Reporting the indicators for the types in this category"
-  report(
-    "Reports only projects where the indicator is filled in"
-    filledOnly: Boolean,
-    "Reports on the projects matching this label"
-    label: String,
-    "Reports on the projects belonging to this portfolio"
-    portfolio: String,
-    "Reports on the project matching this ID"
-    projectId: Int,
-    "Reports on the project matching this name"
-    projectName: String
-  ): IndicatorCategoryReport!
-  "Source for this category"
-  source: IndicatorSource
-  "List of indicator types belonging to this category."
-  types: [ProjectIndicatorType!]!
-}
-
-"Report of indicators for a category"
-type IndicatorCategoryReport {
-  "Report of indicators per project"
-  projectReport(
-    "Rate must be worse or equal."
-    rate: String
-  ): [IndicatorCategoryReportProject!]!
-  "Report of indicators per type"
-  typeReport: [IndicatorCategoryReportType!]!
-}
-
-"Report of indicators for one project"
-type IndicatorCategoryReportProject {
-  "Indicators for one projects and types in this category"
-  indicators: [ProjectIndicator!]!
-  "Associated project"
-  project: Project
-}
-
-"Report of indicators for one type"
-type IndicatorCategoryReportType {
-  "Indicators for one projects and types in this category"
-  projectIndicators: [IndicatorCategoryReportTypeEntry!]!
-  "Associated type"
-  type: ProjectIndicatorType
-}
-
-"Indicator for one project and one type"
-type IndicatorCategoryReportTypeEntry {
-  "Indicator for one project and one type"
-  indicator: ProjectIndicator!
-  "Associated project"
-  project: Project
-}
-
-"Association of a category and statistics over several items"
-type IndicatorCategoryStats {
-  "Associated indicator category"
-  category: IndicatorCategory
-  "previousStats field"
-  previousStats: IndicatorPreviousStats
-  "Statistics"
-  stats: IndicatorStats
-}
-
-"Computed indicator category"
-type IndicatorComputedCategory {
-  "Indicator category ID"
-  id: String
-  "Indicator category name"
-  name: String
-}
-
-"Grouping indicators for a group of projects identified by labels."
-type IndicatorPortfolio {
-  "Indicator categories being shown for this portfolio"
-  categories: [IndicatorCategory!]!
-  "Stats per category"
-  categoryStats(
-    "Number of seconds (> 0) to get indicator trends from."
-    duration: Int
-  ): [IndicatorCategoryStats!]! @deprecated(reason : "Use viewStats with viewId = null. This field will be removed in V5.")
-  "ID of the portfolio"
-  id: String
-  "Label for this portfolio"
-  label: Label
-  "Name of the portfolio"
-  name: String
-  "List of projects associated with this portfolio"
-  projects: [Project!]!
-  "Indicators stats for a given view for this portfolio"
-  viewStats(
-    "Number of seconds (> 0) to get indicator trends from."
-    duration: Int,
-    "ID of the indicator view, set to null to use the portfolio default configuration"
-    id: String
-  ): [IndicatorCategoryStats!]
-}
-
-"Indicator stats from the past"
-type IndicatorPreviousStats {
-  "avgTrend field"
-  avgTrend: String
-  "Time (in seconds) since the indicator values were computed or entered."
-  durationSeconds: Int
-  "maxTrend field"
-  maxTrend: String
-  "minTrend field"
-  minTrend: String
-  "stats field"
-  stats: IndicatorStats!
-}
-
-"Indicator source"
-type IndicatorSource {
-  "Indicator source name"
-  name: String!
-  "Indicator source provider"
-  provider: IndicatorSourceProviderDescription
-}
-
-"Indicator source provider description"
-type IndicatorSourceProviderDescription {
-  "Indicator source provider ID"
-  id: String
-  "Indicator source provider name"
-  name: String
-}
-
-"Aggregation of ratings over several items."
-type IndicatorStats {
-  "Average value (undefined if no stat available)"
-  avg: Int
-  "Rating for the min value"
-  avgRating: String
-  "Number of items having an actual usable value for stat computation"
-  count: Int
-  "Maximal value (undefined if no stat available)"
-  max: Int
-  "Number of items having the maximum value"
-  maxCount: Int
-  "Rating for the min value"
-  maxRating: String
-  "Minimal value (undefined if no stat available)"
-  min: Int
-  "Number of items having the minimum value"
-  minCount: Int
-  "Rating for the min value"
-  minRating: String
-  "Total number of items used for this stat"
-  total: Int
-}
-
-"Association of a type and statistics over several items"
-type IndicatorTypeStats {
-  "Statistics"
-  stats: IndicatorStats
-  "Associated indicator type"
-  type: ProjectIndicatorType
-}
-
-"Aggregator of indicator types"
-type IndicatorTypes {
-  "List of indicator types"
-  types(
-    "ID of the indicator category"
-    category: String,
-    "ID of the indicator type"
-    id: String
-  ): [ProjectIndicatorType!]!
-}
-
-"Indicator value type"
-type IndicatorValueType {
-  "Extension feature"
-  feature: ExtensionFeatureDescription
-  "FQCN of the value type"
-  id: String
-  "Display name of the value type"
-  name: String!
-}
-
-"List of categories to display for a portfolio or a list of portfolios."
-type IndicatorView {
-  "Selected categories for this view"
-  categories: [IndicatorCategory!]!
-  "Unique ID for this view"
-  id: String!
-  "Name of the view"
-  name: String!
-  "List of indicator stats per project for all categories in this view"
-  reports(
-    "Number of seconds (> 0) to get indicator trends from."
-    duration: Int,
-    "Reports only projects where the indicator is filled in"
-    filledOnly: Boolean,
-    "Reports on the projects matching this label"
-    label: String,
-    "Reports on the projects belonging to this portfolio"
-    portfolio: String,
-    "Reports on the project matching this ID"
-    projectId: Int,
-    "Reports on the project matching this name"
-    projectName: String,
-    "Rate must be worse or equal."
-    rate: String
-  ): [IndicatorViewProjectReport!]!
-}
-
-"List of indicator views and management links."
-type IndicatorViewList {
-  "List of indicator views"
-  views(
-    "ID of the view to put in the list"
-    id: String,
-    "Name of the view to put in the list"
-    name: String
-  ): [IndicatorView!]!
-}
-
-"View report line for a project"
-type IndicatorViewProjectReport {
-  "Associated project"
-  project: Project!
-  "List of stats per category in the view"
-  viewStats: [IndicatorCategoryStats!]!
-}
-
-"Management of indicators"
-type IndicatorsManagement {
-  "Management of the indicators categories"
-  categories: Boolean
-  "Management of the configurable indicators"
-  configuration: Boolean
-  "Access to the indicator portfolios"
-  portfolios: Boolean
-  "Management of the indicators types"
-  types: Boolean
-  "Management of the indicators views"
-  views: Boolean
 }
 
 "Application information"
@@ -3354,6 +4010,11 @@ type Mutation {
     "Input for the mutation"
     input: CreateEnvironmentInput
   ): CreateEnvironmentPayload
+  "Creates an estate. Its readings are computed by its daily job, or on recompute."
+  createEstate(
+    "Input for the mutation"
+    input: CreateEstateInput
+  ): CreateEstatePayload
   "Creates a new GitHub configuration."
   createGitHubConfiguration(
     "Input for the mutation"
@@ -3454,6 +4115,11 @@ type Mutation {
     "Input for the mutation"
     input: DeleteAccountGroupInput
   ): DeleteAccountGroupPayload
+  "Deletes an agent and its tokens. Its name stays on every signature. Owner or administrator only."
+  deleteAgent(
+    "Input for the mutation"
+    input: DeleteAgentInput
+  ): DeleteAgentPayload
   "Deletes the auto-versioning configuration from a branch"
   deleteAutoVersioningConfig(
     "Input for the mutation"
@@ -3504,6 +4170,16 @@ type Mutation {
     "Input for the mutation"
     input: DeleteBranchReleaseValidationPropertyByIdInput
   ): DeleteBranchReleaseValidationPropertyByIdPayload
+  "Deletes the assisted change property on a build identified by name."
+  deleteBuildAssistedChangeProperty(
+    "Input for the mutation"
+    input: DeleteBuildAssistedChangePropertyInput
+  ): DeleteBuildAssistedChangePropertyPayload
+  "Deletes the assisted change property on a build."
+  deleteBuildAssistedChangePropertyById(
+    "Input for the mutation"
+    input: DeleteBuildAssistedChangePropertyByIdInput
+  ): DeleteBuildAssistedChangePropertyByIdPayload
   "Deletes the bitbucket Pipelines run property on a build identified by name."
   deleteBuildBitbucketPipelineRunProperty(
     "Input for the mutation"
@@ -3534,6 +4210,16 @@ type Mutation {
     "Input for the mutation"
     input: DeleteBuildGitCommitPropertyByIdInput
   ): DeleteBuildGitCommitPropertyByIdPayload
+  "Deletes the gitLab pipeline property on a build identified by name."
+  deleteBuildGitLabPipelineRunProperty(
+    "Input for the mutation"
+    input: DeleteBuildGitLabPipelineRunPropertyInput
+  ): DeleteBuildGitLabPipelineRunPropertyPayload
+  "Deletes the gitLab pipeline property on a build."
+  deleteBuildGitLabPipelineRunPropertyById(
+    "Input for the mutation"
+    input: DeleteBuildGitLabPipelineRunPropertyByIdInput
+  ): DeleteBuildGitLabPipelineRunPropertyByIdPayload
   "Deletes build links from a build, optionally filtered by target project and/or qualifier"
   deleteBuildLinks(
     "Input for the mutation"
@@ -3586,6 +4272,16 @@ type Mutation {
     "Input for the mutation"
     input: DeleteEnvironmentInput
   ): DeleteEnvironmentPayload
+  "Deletes an estate, with its snapshots"
+  deleteEstate(
+    "Input for the mutation"
+    input: DeleteEstateInput
+  ): DeleteEstatePayload
+  "Deletes an evidence: it is kept, marked as deleted, and its deletion is written to the trail of its build. Requires the EvidenceDelete function on its project."
+  deleteEvidence(
+    "Input for the mutation"
+    input: DeleteEvidenceInput
+  ): DeleteEvidencePayload
   "Generic deletion for a property and an entity"
   deleteGenericProperty(
     "Input for the mutation"
@@ -3753,6 +4449,26 @@ type Mutation {
     "Input for the mutation"
     input: DeleteProjectStalePropertyByIdInput
   ): DeleteProjectStalePropertyByIdPayload
+  "Deletes the agents admitted property on a promotion level identified by name."
+  deletePromotionLevelAgentsAdmittedProperty(
+    "Input for the mutation"
+    input: DeletePromotionLevelAgentsAdmittedPropertyInput
+  ): DeletePromotionLevelAgentsAdmittedPropertyPayload
+  "Deletes the agents admitted property on a promotion level."
+  deletePromotionLevelAgentsAdmittedPropertyById(
+    "Input for the mutation"
+    input: DeletePromotionLevelAgentsAdmittedPropertyByIdInput
+  ): DeletePromotionLevelAgentsAdmittedPropertyByIdPayload
+  "Deletes the assisted builds require property on a promotion level identified by name."
+  deletePromotionLevelAssistedBuildsRequireProperty(
+    "Input for the mutation"
+    input: DeletePromotionLevelAssistedBuildsRequirePropertyInput
+  ): DeletePromotionLevelAssistedBuildsRequirePropertyPayload
+  "Deletes the assisted builds require property on a promotion level."
+  deletePromotionLevelAssistedBuildsRequirePropertyById(
+    "Input for the mutation"
+    input: DeletePromotionLevelAssistedBuildsRequirePropertyByIdInput
+  ): DeletePromotionLevelAssistedBuildsRequirePropertyByIdPayload
   "Deletes the auto promotion property on a promotion level identified by name."
   deletePromotionLevelAutoPromotionProperty(
     "Input for the mutation"
@@ -3883,6 +4599,16 @@ type Mutation {
     "Input for the mutation"
     input: DeleteValidationStampMetaInfoPropertyByIdInput
   ): DeleteValidationStampMetaInfoPropertyByIdPayload
+  "Deletes the evidence from non-agents only property on a validation stamp identified by name."
+  deleteValidationStampNonAgentEvidenceProperty(
+    "Input for the mutation"
+    input: DeleteValidationStampNonAgentEvidencePropertyInput
+  ): DeleteValidationStampNonAgentEvidencePropertyPayload
+  "Deletes the evidence from non-agents only property on a validation stamp."
+  deleteValidationStampNonAgentEvidencePropertyById(
+    "Input for the mutation"
+    input: DeleteValidationStampNonAgentEvidencePropertyByIdInput
+  ): DeleteValidationStampNonAgentEvidencePropertyByIdPayload
   "Deleting an existing webhook"
   deleteWebhook(
     "Input for the mutation"
@@ -3928,6 +4654,11 @@ type Mutation {
     "Input for the mutation"
     input: EnableSubscriptionInput
   ): EnableSubscriptionPayload
+  "Marks a running pipeline as failed"
+  failSlotPipeline(
+    "Input for the mutation"
+    input: FailSlotPipelineInput
+  ): FailSlotPipelinePayload
   "Marks a branch as favourite"
   favouriteBranch(
     "Input for the mutation"
@@ -3943,6 +4674,11 @@ type Mutation {
     "Input for the mutation"
     input: FinishSlotPipelineDeploymentInput
   ): FinishSlotPipelineDeploymentPayload
+  "Generates a named token for an agent, under the usual validity rules of the instance. The value of the token is returned only this once. Owner or administrator only."
+  generateAgentToken(
+    "Input for the mutation"
+    input: GenerateAgentTokenInput
+  ): GenerateAgentTokenPayload
   "Generate a new token"
   generateToken(
     "Input for the mutation"
@@ -4072,6 +4808,21 @@ type Mutation {
   purgeHookRecordings: PurgeHookRecordingsPayload
   "Purging all records for Queue messages"
   purgeQueueRecordings: PurgeQueueRecordingsPayload
+  "Queues the recompute of the readings of every project of an estate, overwriting the snapshots of the day."
+  recomputeEstate(
+    "Input for the mutation"
+    input: RecomputeEstateInput
+  ): RecomputeEstatePayload
+  "Queues the recompute of the readings of a project, in every set it is in, overwriting the snapshots of the day. Needs the right to configure the project."
+  recomputeProjectScorecard(
+    "Input for the mutation"
+    input: RecomputeProjectScorecardInput
+  ): RecomputeProjectScorecardPayload
+  "Registers an agent. Any user registers agents for themselves; only an administrator registers one for another owner. The agent is created with no rights of its own."
+  registerAgent(
+    "Input for the mutation"
+    input: RegisterAgentInput
+  ): RegisterAgentPayload
   "Reload the configuration from the CasC files"
   reloadCasc: ReloadCascPayload
   "Renames an existing subscription"
@@ -4108,6 +4859,16 @@ type Mutation {
     "Input for the mutation"
     input: RevokeAccountTokensInput
   ): RevokeAccountTokensPayload
+  "Revokes a named token of an agent. Owner or administrator only."
+  revokeAgentToken(
+    "Input for the mutation"
+    input: RevokeAgentTokenInput
+  ): RevokeAgentTokenPayload
+  "Revokes all the tokens of an agent. Owner or administrator only."
+  revokeAllAgentTokens(
+    "Input for the mutation"
+    input: RevokeAllAgentTokensInput
+  ): RevokeAllAgentTokensPayload
   "Revokes all tokens"
   revokeAllTokens: RevokeAllTokensPayload
   "Revoke the given token"
@@ -4216,6 +4977,16 @@ type Mutation {
     "Input for the mutation"
     input: SetBranchReleaseValidationPropertyByIdInput
   ): SetBranchReleaseValidationPropertyByIdPayload
+  "Set the assisted change property on a build identified by name."
+  setBuildAssistedChangeProperty(
+    "Input for the mutation"
+    input: SetBuildAssistedChangePropertyInput
+  ): SetBuildAssistedChangePropertyPayload
+  "Set the assisted change property on a build."
+  setBuildAssistedChangePropertyById(
+    "Input for the mutation"
+    input: SetBuildAssistedChangePropertyByIdInput
+  ): SetBuildAssistedChangePropertyByIdPayload
   "Set the bitbucket Pipelines run property on a build identified by name."
   setBuildBitbucketPipelineRunProperty(
     "Input for the mutation"
@@ -4236,6 +5007,16 @@ type Mutation {
     "Input for the mutation"
     input: SetBuildGitCommitPropertyByIdInput
   ): SetBuildGitCommitPropertyByIdPayload
+  "Set the gitLab pipeline property on a build identified by name."
+  setBuildGitLabPipelineRunProperty(
+    "Input for the mutation"
+    input: SetBuildGitLabPipelineRunPropertyInput
+  ): SetBuildGitLabPipelineRunPropertyPayload
+  "Set the gitLab pipeline property on a build."
+  setBuildGitLabPipelineRunPropertyById(
+    "Input for the mutation"
+    input: SetBuildGitLabPipelineRunPropertyByIdInput
+  ): SetBuildGitLabPipelineRunPropertyByIdPayload
   "Set the message property on a build identified by name."
   setBuildMessageProperty(
     "Input for the mutation"
@@ -4421,6 +5202,26 @@ type Mutation {
     "Input for the mutation"
     input: SetProjectStalePropertyByIdInput
   ): SetProjectStalePropertyByIdPayload
+  "Set the agents admitted property on a promotion level identified by name."
+  setPromotionLevelAgentsAdmittedProperty(
+    "Input for the mutation"
+    input: SetPromotionLevelAgentsAdmittedPropertyInput
+  ): SetPromotionLevelAgentsAdmittedPropertyPayload
+  "Set the agents admitted property on a promotion level."
+  setPromotionLevelAgentsAdmittedPropertyById(
+    "Input for the mutation"
+    input: SetPromotionLevelAgentsAdmittedPropertyByIdInput
+  ): SetPromotionLevelAgentsAdmittedPropertyByIdPayload
+  "Set the assisted builds require property on a promotion level identified by name."
+  setPromotionLevelAssistedBuildsRequireProperty(
+    "Input for the mutation"
+    input: SetPromotionLevelAssistedBuildsRequirePropertyInput
+  ): SetPromotionLevelAssistedBuildsRequirePropertyPayload
+  "Set the assisted builds require property on a promotion level."
+  setPromotionLevelAssistedBuildsRequirePropertyById(
+    "Input for the mutation"
+    input: SetPromotionLevelAssistedBuildsRequirePropertyByIdInput
+  ): SetPromotionLevelAssistedBuildsRequirePropertyByIdPayload
   "Set the auto promotion property on a promotion level identified by name."
   setPromotionLevelAutoPromotionProperty(
     "Input for the mutation"
@@ -4546,6 +5347,16 @@ type Mutation {
     "Input for the mutation"
     input: SetValidationStampMetaInfoPropertyByIdInput
   ): SetValidationStampMetaInfoPropertyByIdPayload
+  "Set the evidence from non-agents only property on a validation stamp identified by name."
+  setValidationStampNonAgentEvidenceProperty(
+    "Input for the mutation"
+    input: SetValidationStampNonAgentEvidencePropertyInput
+  ): SetValidationStampNonAgentEvidencePropertyPayload
+  "Set the evidence from non-agents only property on a validation stamp."
+  setValidationStampNonAgentEvidencePropertyById(
+    "Input for the mutation"
+    input: SetValidationStampNonAgentEvidencePropertyByIdInput
+  ): SetValidationStampNonAgentEvidencePropertyByIdPayload
   "Sets a property on a validation stamp identified by name"
   setValidationStampProperty(
     "Input for the mutation"
@@ -4675,6 +5486,11 @@ type Mutation {
     "Input for the mutation"
     input: TestWebhookInput
   ): TestWebhookPayload
+  "Transfers an agent to another owner, who must be a person. Administrator only."
+  transferAgent(
+    "Input for the mutation"
+    input: TransferAgentInput
+  ): TransferAgentPayload
   "Unmarks a branch as favourite"
   unfavouriteBranch(
     "Input for the mutation"
@@ -4690,6 +5506,11 @@ type Mutation {
     "Input for the mutation"
     input: UnshareSCMFileChangeFilterInput
   ): UnshareSCMFileChangeFilterPayload
+  "Updates the display name, the tool and the description of an agent. Its slug never changes. Owner or administrator only."
+  updateAgent(
+    "Input for the mutation"
+    input: UpdateAgentInput
+  ): UpdateAgentPayload
   "Updates an existing build"
   updateBuild(
     "Input for the mutation"
@@ -4700,6 +5521,11 @@ type Mutation {
     "Input for the mutation"
     input: UpdateConfigurationInput
   ): UpdateConfigurationPayload
+  "Replaces the definition of an estate. Its snapshots are kept."
+  updateEstate(
+    "Input for the mutation"
+    input: UpdateEstateInput
+  ): UpdateEstatePayload
   "Updates a Jenkins configuration"
   updateJenkinsConfiguration(
     "Input for the mutation"
@@ -4735,6 +5561,11 @@ type Mutation {
     "Input for the mutation"
     input: UpdatePromotionLevelByIdInput
   ): UpdatePromotionLevelByIdPayload
+  "Updates the description of a slot and whether it admits agents"
+  updateSlot(
+    "Input for the mutation"
+    input: UpdateSlotInput
+  ): UpdateSlotPayload
   "Updates an existing validation stamp"
   updateValidationStampById(
     "Input for the mutation"
@@ -4780,6 +5611,11 @@ type Mutation {
     "Input for the mutation"
     input: ValidateBuildWithCHMLInput
   ): ValidateBuildWithCHMLPayload
+  "Validates a build identified by name with the report of a security scan, creating a validation run with the counts of its findings."
+  validateBuildWithFindings(
+    "Input for the mutation"
+    input: ValidateBuildWithFindingsInput
+  ): ValidateBuildWithFindingsPayload
   "Validates a build identified by name with Metrics data"
   validateBuildWithMetrics(
     "Input for the mutation"
@@ -5035,17 +5871,24 @@ type Project implements Authorizable & ProjectEntity {
   disabled: Boolean!
   "Is this project a favourite of the current user?"
   favourite: Boolean
+  "Security findings of the project, the most severe first, then the most recently seen. Empty for a user who is not granted the view of the findings of the project."
+  findings(
+    "Filter on the findings"
+    filter: FindingFilter,
+    "Offset for the page"
+    offset: Int = 0,
+    "Size of the page"
+    size: Int = 20
+  ): FindingPaginated
+  "Summary of the security findings of the project: its open findings by severity, and their exposure per branch. Null for a user who is not granted the view of the findings of the project."
+  findingsSummary: FindingsSummary
   "Associates the project with a GitHub repository"
   gitHubProjectConfigurationProperty: Property
   "Associates the project with a GitLab repository"
   gitLabProjectConfigurationProperty: Property
-  "Associates the project with a Git repository"
-  gitProjectConfigurationProperty: Property
   "URL to the HTML page of the Git repository associated with this project"
   gitRepositoryHtmlURL: String
   id: ID!
-  "List of indicator portfolios associated with this project, through its labels."
-  indicatorPortfolios: [IndicatorPortfolio!]!
   "List of information components attached to this entity"
   information: [EntityInformation!]!
   "Link to a Jenkins Job"
@@ -5068,8 +5911,6 @@ type Project implements Authorizable & ProjectEntity {
   name: String
   "Makes a promotion conditional based on the fact that a previous promotion has been granted."
   previousPromotionConditionProperty: Property
-  "List of project indicators"
-  projectIndicators: ProjectIndicators
   "Authorisations for the project"
   projectRoles(
     "Filter by role name"
@@ -5101,6 +5942,8 @@ type Project implements Authorizable & ProjectEntity {
     "Key of the issue"
     issueKey: String!
   ): SCMIssueInfo
+  "Delivery scorecard of the project: its readings in every set it is in, with their daily history"
+  scorecard: Scorecard!
   "Graph of environment slots for a project"
   slotGraph(
     "Qualifier for the slots"
@@ -5144,19 +5987,6 @@ type ProjectAuthorization {
   name: String
 }
 
-"Association of an indicator category and a list of associated indicators."
-type ProjectCategoryIndicators {
-  "Indicator category"
-  category: IndicatorCategory
-  "Indicator stats for this project and category"
-  categoryStats(
-    "Number of seconds (> 0) to get indicator trends from."
-    duration: Int
-  ): IndicatorCategoryStats
-  "List of indicators"
-  indicators: [ProjectIndicator!]!
-}
-
 type ProjectEntityID {
   "Project entity ID"
   id: ID
@@ -5183,118 +6013,6 @@ type ProjectEntityInformation {
   type: ProjectEntityType!
 }
 
-"Project indicator"
-type ProjectIndicator {
-  "Comment with links."
-  annotatedComment: String
-  "Comment for the indicator"
-  comment: String
-  "Compliance for the indicator"
-  compliance: Int
-  "Time elapsed (in seconds) since the indicator value was set."
-  durationSecondsSince: Int
-  "History of this indicator"
-  history(
-    "Offset for the page"
-    offset: Int = 0,
-    "Size of the page"
-    size: Int = 20
-  ): ProjectIndicatorHistoryItemPaginated
-  "Previous value for this indicator"
-  previousValue: ProjectIndicator
-  "Associated project"
-  project: Project
-  "Rating for this indicator"
-  rating: String
-  "Signature for the indicator"
-  signature: Signature
-  "Trend since the previous value (if any)"
-  trendSincePrevious: String
-  "Type of indicator"
-  type: ProjectIndicatorType
-  "Value for the indicator"
-  value: JSON
-}
-
-"Project indicator"
-type ProjectIndicatorHistoryItem {
-  "Comment with links."
-  annotatedComment: String
-  "Comment for the indicator"
-  comment: String
-  "Compliance for the indicator"
-  compliance: Int
-  "Time elapsed (in seconds) since the indicator value was set."
-  durationSecondsSince: Int
-  "Rating for this indicator"
-  rating: String
-  "Signature for the indicator"
-  signature: Signature
-  "Type of indicator"
-  type: ProjectIndicatorType
-  "Value for the indicator"
-  value: JSON
-}
-
-type ProjectIndicatorHistoryItemPaginated {
-  "Information about the current page"
-  pageInfo: PageInfo
-  "Items in the current page"
-  pageItems: [ProjectIndicatorHistoryItem!]!
-}
-
-"Type of indicator"
-type ProjectIndicatorType {
-  "Associated category"
-  category: IndicatorCategory
-  "Flag which indicates if the associated project indicators are computed or not"
-  computed: Boolean
-  "Indicator type deprecation reason if any"
-  deprecated: String
-  "Unique ID for the type"
-  id: String
-  "List of indicators for this type"
-  indicators(
-    "Reports only projects where the indicator is filled in"
-    filledOnly: Boolean,
-    "Reports on the projects matching this label"
-    label: String,
-    "Reports on the projects belonging to this portfolio"
-    portfolio: String,
-    "Reports on the project matching this ID"
-    projectId: Int,
-    "Reports on the project matching this name"
-    projectName: String,
-    "Rate must be worse or equal."
-    rate: String
-  ): [ProjectIndicator!]!
-  "Link to the definition of the indicator"
-  link: String
-  "Name for the indicator type"
-  name: String
-  "Source for this type"
-  source: IndicatorSource
-  "Configuration for the value type"
-  valueConfig: JSON
-  "Value type"
-  valueType: IndicatorValueType
-}
-
-"List of indicators for a project"
-type ProjectIndicators {
-  "List of indicator categories"
-  categories: [ProjectCategoryIndicators!]!
-  "List of indicators"
-  indicators(
-    "Restriction on the indicator category"
-    category: String,
-    "Restriction on the indicator type"
-    type: String
-  ): [ProjectIndicator!]!
-  "Associated project"
-  project: Project
-}
-
 type ProjectPaginated {
   "Information about the current page"
   pageInfo: PageInfo
@@ -5312,16 +6030,20 @@ type ProjectRole {
 }
 
 type PromotionLevel implements Authorizable & ProjectEntity {
+  "Admits registered agents to this promotion level: an agent may promote a build to it, provided its owner may. Without it, an agent may not promote to this level. Auto-promotion is not concerned."
+  agentsAdmittedProperty: Property
   "Description with links."
   annotatedDescription: String
+  "If the build is assisted (its commits were written with coding agents), these validation stamps must pass before it is promoted to this level. An unknown assisted change counts as assisted. Needs the licensed feature \"Agent governance\"."
+  assistedBuildsRequireProperty: Property
   "Authorizations for this context"
   authorizations: [Authorization!]!
+  "Current conditions of the auto promotion of this promotion level - null when it has no auto promotion"
+  autoPromotionConditions: AutoPromotionConditions
   "Allows a promotion level to be granted on a build as soon as a list of validation stamps and/or other promotions has been passed"
   autoPromotionProperty: Property
   "List of branches targeted for auto-versioning based on this promotion level"
   autoVersioningTargets: [AutoVersioningConfiguredBranch!]!
-  "List of branches targeted for auto-versioning based on this promotion level or with their reason for rejection"
-  autoVersioningTrail: AutoVersioningTrail @deprecated(reason : "Will be removed in V6. Use autoVersioningTrailPaginated instead.")
   "List of branches targeted for auto-versioning based on this promotion or with their reason for rejection"
   autoVersioningTrailPaginated(
     filter: AutoVersioningTrailFilter,
@@ -5361,13 +6083,6 @@ type PromotionLevel implements Authorizable & ProjectEntity {
   promotedBuildCount: Int!
   "List of promotions a promotion depends on before being applied."
   promotionDependenciesProperty: Property
-  "List of runs for this promotion"
-  promotionRuns(
-    "Number of items to return from the beginning of the list"
-    first: Int,
-    "Number of items to return from the end of the list"
-    last: Int
-  ): [PromotionRun!]! @deprecated(reason : "Use the paginated promotion runs with the `promotionRunsPaginated` field.")
   "Paginated list of promotion runs"
   promotionRunsPaginated(
     "Keeps only runs after this data / time"
@@ -5421,8 +6136,8 @@ type PromotionRun implements Authorizable & ProjectEntity {
   annotatedDescription: String
   "Authorizations for this context"
   authorizations: [Authorization!]!
-  "List of branches targeted for auto-versioning based on this promotion run or with their reason for rejection"
-  autoVersioningTrail: AutoVersioningTrail @deprecated(reason : "Will be removed in V6. Use autoVersioningTrailPaginated instead.")
+  "Current conditions of the auto promotion of this run's promotion level, with their current state for this run's build - null when the promotion level has no auto promotion"
+  autoPromotionConditions: AutoPromotionBuildConditions
   "List of branches targeted for auto-versioning based on this promotion run or with their reason for rejection"
   autoVersioningTrailPaginated(
     filter: AutoVersioningTrailFilter,
@@ -5544,6 +6259,45 @@ type Query {
     "Filtering accounts having this token in the name, email or groups"
     token: String
   ): [Account!]
+  "The latest actions of the agents: the events whose actor is an agent, newest first, on the projects the caller can see (the events without a project for the administrators only). A page holds at most 100 events. There is no total count: `pageInfo.nextPage` tells whether there are more events. The events follow the retention of the events. Requires the Agent governance licence (`extension.agents`)."
+  agentActions(
+    "Identifier of one agent, `<slug>[agent]` - all the agents when absent"
+    agent: String,
+    "IDs of the event types to keep - empty or absent for all the types"
+    eventTypes: [String!],
+    "Events at or after this time (UTC, inclusive)"
+    from: LocalDateTime,
+    "Offset for the page"
+    offset: Int = 0,
+    "Name of a project, matching the event's project or its extra project"
+    project: String,
+    "Size of the page"
+    size: Int = 20,
+    "Events at or before this time (UTC, inclusive)"
+    to: LocalDateTime
+  ): EventAgentActionsPaginated
+  "How much of the delivery the agents drive over a window of days: builds, promotions and deployments by agents, and the assisted share of the builds - across the projects the caller can see. Requires the Agent governance licence (`extension.agents`)."
+  agentActivityStats(
+    "Labels the projects must all carry, as `category:name` (`name` for a label without a category) - no restriction when empty or absent"
+    labels: [String!],
+    "Names of the projects to narrow the counts to - all the visible projects when empty or absent"
+    projects: [String!],
+    "Number of days of the window, ending now - 30 by default, at most 366"
+    window: Int
+  ): AgentActivityStats
+  "Registered agents: every agent for an administrator, only their own agents for any other user. An agent is an account of kind AGENT, owned by a person, acting with its own tokens."
+  agents(
+    "Restricts the list to the agent with this ID"
+    id: Int,
+    "Restricts the list to the agents of this owner, given by email"
+    owner: String
+  ): [Account!]!
+  "Public keys of the instance, with which the endorsements of the entries of its trails are verified - empty while no key exists"
+  auditTrailKeys: [AuditTrailKey!]!
+  "Status of the audit trail: licence, evidence storage and instance key - requires the global settings"
+  auditTrailStatus: AuditTrailStatus!
+  "State of the evidence storage, as its last probe found it - readable by every user, without the configuration of the storage"
+  auditTrailStorageState: AuditTrailStorageState!
   "Getting a list of authorizations for the authenticated user"
   authorizations: [Authorization!]!
   "List of audit entries for auto versioning processing orders"
@@ -5617,13 +6371,6 @@ type Query {
   ): [Build!]
   "Configuration as Code"
   casc: CasC!
-  "List of configurable indicators"
-  configurableIndicators(
-    "Filter the indicators on their category ID"
-    category: String,
-    "Filter the indicators on their type ID"
-    type: String
-  ): [ConfigurableIndicatorTypeState!]!
   "Gets a configuration for a given type and name"
   configurationByName(
     "Configuration name"
@@ -5667,6 +6414,15 @@ type Query {
     "Name of the environment"
     name: String!
   ): Environment
+  "Projects x environments, as the Environments home draws them"
+  environmentMatrix(
+    "What narrows the matrix down. Applied before paging."
+    filter: EnvironmentMatrixFilter,
+    "Index of the first project to return"
+    offset: Int,
+    "Number of projects to return (defaults to 20)"
+    size: Int
+  ): EnvironmentMatrix!
   "List of environments"
   environments(
     "Filter on the environments"
@@ -5674,6 +6430,13 @@ type Query {
   ): [Environment!]!
   "Returns the number of environments"
   environmentsCount: Int!
+  "Estate by name, null if none. Needs the licensed feature \"Delivery scorecard\"."
+  estate(
+    "Name of the estate"
+    name: String!
+  ): Estate
+  "All the estates, by name. Needs the licensed feature \"Delivery scorecard\"."
+  estates: [Estate!]!
   "List of event subscriptions"
   eventSubscriptions(
     "Filter for the subscriptions"
@@ -5685,6 +6448,30 @@ type Query {
   ): EventSubscriptionPayloadPaginated
   "List of all event types"
   eventTypes: [EventType!]!
+  "Audit of all the events of the instance, newest first, whatever the project ACLs. Requires the events audit function, granted to the administrators. A page holds at most 100 events. There is no total count: `pageInfo.nextPage` tells whether there are more events, and `pageInfo.totalSize` is only the number of events known so far."
+  events(
+    "Filter on the events"
+    filter: EventFilterInput,
+    "Offset for the page"
+    offset: Int = 0,
+    "Size of the page"
+    size: Int = 20
+  ): EventPaginated
+  "What the export of the events matching a filter would hold: its maximum number of events, and whether more events than that match the filter. Requires the events audit function, granted to the administrators."
+  eventsExport(
+    "Filter on the events"
+    filter: EventFilterInput
+  ): EventsExportInfo
+  "Security finding by ID. Null when it does not exist, or when the user is not granted the view of the findings of its project."
+  finding(
+    "ID of the finding"
+    id: Int!
+  ): Finding
+  "Security findings having the given external ID (a CVE, a rule ID) across all the projects, by project name. Only the projects whose findings the user is granted the view of are searched."
+  findings(
+    "External ID of the findings"
+    externalId: String!
+  ): [Finding!]!
   "Getting data for a chart"
   getChart(
     "Parameters for getting the chart"
@@ -5753,19 +6540,6 @@ type Query {
     "Size of the page"
     size: Int = 20
   ): HookRecordingPaginated
-  "List of indicator categories"
-  indicatorCategories: IndicatorCategories
-  "List of indicator portfolios"
-  indicatorPortfolios(
-    "ID of the indicator portfolio"
-    id: String
-  ): [IndicatorPortfolio!]!
-  "List of indicator types"
-  indicatorTypes: IndicatorTypes
-  "List of indicator views."
-  indicatorViewList: IndicatorViewList
-  "List of available commands for the management of the indicators"
-  indicatorsManagement: IndicatorsManagement! @deprecated(reason : "Will be removed in 4.6")
   "Gets information about the application"
   info: Info
   "List of issue services"
@@ -6032,17 +6806,23 @@ type Query {
     "Name of the branch of the build to, used to disambiguate its name"
     toBranch: String
   ): SCMChangeLog
-  "Performs a search in Ontrack"
+  "Performs a search across the types of results, ranked together. Only what the user can see is returned and counted."
   search(
-    "Offset for the page"
+    "Index of the first result to return"
     offset: Int = 0,
-    "Size of the page"
+    "When set, returns the best N results of each type in one request, instead of a page: offset and size are then ignored."
+    perType: Int,
+    "Text to look for, at least 2 characters long. Required, unless the deprecated `token` is used."
+    query: String,
+    "Maximum number of results to return"
     size: Int = 20,
     "Query string"
-    token: String!,
+    token: String @deprecated(reason : "Use query. Will be removed in 7.0."),
     "Result type"
-    type: String!
-  ): SearchResultPaginated
+    type: String @deprecated(reason : "Use types. Will be removed in 7.0."),
+    "IDs of the types of results to look into. All of them by default."
+    types: [String!]
+  ): SearchResults!
   "List of types of search results"
   searchResultTypes: [SearchResultType!]!
   "Ontrack settings"
@@ -6163,6 +6943,8 @@ type QueueDispatchResult {
 type QueuePayload {
   "Identity of the user"
   accountName: String!
+  "Who sent the message, and through which channel. When absent, the message is processed by its account acting as system."
+  actor: JSON
   "Message body for the processor"
   body: JSON!
   "Unique ID of the message"
@@ -6234,6 +7016,24 @@ type QueueSource {
   id: String!
 }
 
+"One external ID of the security findings of some projects, with the number of these projects in which it is open, accepted or resolved, each project counted once, by its most exposed finding."
+type RankedFinding {
+  "Number of projects in which the finding is accepted, and not open"
+  acceptedProjects: Int!
+  "External ID of the findings, like a CVE or a rule ID"
+  externalId: String!
+  "Earliest time any of the findings was first seen"
+  firstSeen: LocalDateTime!
+  "Number of projects in which the finding is open"
+  openProjects: Int!
+  "Number of projects in which the finding is resolved: neither open nor accepted"
+  resolvedProjects: Int!
+  "Highest maximum severity of the findings"
+  severity: FindingSeverity!
+  "Title of the findings, the one of the most exposed, then most severe, of them"
+  title: String!
+}
+
 "Rate limit representation"
 type RateLimit {
   "Absolute limit"
@@ -6242,6 +7042,77 @@ type RateLimit {
   remaining: Int
   "Used calls"
   used: Int
+}
+
+"What a build still lacks to reach a promotion level or a slot, computed now from the current state of the build and the current configuration of the target. Reading it changes nothing."
+type Readiness {
+  "Everything the build still lacks, one item per missing condition, empty when `ready` is true. All failing conditions are listed, not only the first one."
+  missing: [ReadinessItem!]!
+  "True when nothing is missing: the build already has the promotion level, or it meets every condition of the target. A level granted by a person, or a slot with a manual approval, keeps it false until that person acts, even when everything else is satisfied."
+  ready: Boolean!
+}
+
+"One thing a build still lacks to reach a promotion level or a slot"
+type ReadinessItem {
+  "Kind of the missing condition, which says what can be done about it"
+  kind: ReadinessKind!
+  "Explanation of what is missing, in plain words, ready to be shown or acted upon"
+  message: String!
+  "Name of what is missing: the validation stamp for VALIDATION, the promotion level for PROMOTION, the check for CHECK, the admission rule for ADMISSION_RULE, the promotion level or the admission rule for MANUAL, the promotion level or the full name of the slot for AGENT_POLICY"
+  name: String!
+}
+
+"One measurement of one project at one moment, taken by Yontrack from its own data, for one set. Durations are in seconds, frequencies per week."
+type Reading {
+  "What the value rests on"
+  basis: ReadingBasis!
+  "When the reading was computed"
+  computedAt: LocalDateTime!
+  "Day of the snapshot, as an ISO date (YYYY-MM-DD)"
+  day: String!
+  "What explains the value: the sample count (count), the other statistics of a duration (p90, mean, min, max), the kind of marker (markerKind), the marker (marker) and the branches read (scope)."
+  details: JSON
+  "Which way the reading is better, and so how a target judges it. Null for a reading out of the catalogue."
+  direction: ReadingDirection
+  "Daily snapshots of this reading over the last days, oldest first, this one included"
+  history(
+    "Number of days back from today"
+    days: Int = 90
+  ): [Reading!]!
+  "Key of the reading, like delivery.leadTime"
+  key: String!
+  "Target the estate of the set sets for this reading, in the unit of the reading. Null with no estate or no target: the reading is shown, not judged."
+  target: Float
+  "Whether the reading meets its target (true) or misses it (false). Null when it is not judged: no target, or no value."
+  targetMet: Boolean
+  "Why the reading is unknown, null when it is not"
+  unknownReason: ReadingUnknownReason
+  "Value of the reading, null when it is unknown. The median for a duration."
+  value: Float
+  "End of the window the reading was taken over"
+  windowEnd: LocalDateTime!
+  "Start of the window the reading was taken over"
+  windowStart: LocalDateTime!
+}
+
+"Output type for the recomputeEstate mutation."
+type RecomputeEstatePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the recomputeProjectScorecard mutation."
+type RecomputeProjectScorecardPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the registerAgent mutation."
+type RegisterAgentPayload implements Payload {
+  "Registered agent"
+  agent: Account
+  "List of errors"
+  errors: [UserError]
 }
 
 "Output type for the reloadCasc mutation."
@@ -6286,6 +7157,18 @@ type RescheduleAutoVersioningPayload implements Payload {
 
 "Output type for the revokeAccountTokens mutation."
 type RevokeAccountTokensPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the revokeAgentToken mutation."
+type RevokeAgentTokenPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the revokeAllAgentTokens mutation."
+type RevokeAllAgentTokensPayload implements Payload {
   "List of errors"
   errors: [UserError]
 }
@@ -6442,6 +7325,8 @@ type SCMChangeLogIssues {
 
 "Common attributes for a commit (or revision)."
 type SCMCommit {
+  "Assistants (agent kinds) which helped write the commit, read from its trailers, its author and its committer according to the agent markers settings. Empty when no assistant is recognised."
+  assistants: [SCMCommitAssistant!]!
   "Author of the commit"
   author: String!
   "Mail of the author of the commit. Can be `null` if not available."
@@ -6456,6 +7341,16 @@ type SCMCommit {
   shortId: String!
   "Timestamp of the commit"
   timestamp: LocalDateTime!
+}
+
+"Assistant (agent kind) which helped write a commit, as recognised from its trailers, its author and its committer."
+type SCMCommitAssistant {
+  "Markers which named this assistant on the commit, in the order they were found. An assistant appears once per commit, with all its markers."
+  markers: [SCMCommitAssistantMarker!]!
+  "Name of the assistant, e.g. Claude Code, Codex, Copilot, Devin, or the name of an agent marker pattern."
+  name: String!
+  "Link to the agent session behind the commit, when a trailer carries one (e.g. Claude-Session). The first one found wins."
+  sessionLink: String
 }
 
 "Information about a commit"
@@ -6587,6 +7482,42 @@ type ScheduleAutoVersioningPayload implements Payload {
   errors: [UserError]
 }
 
+"The readings of one project, in every set it is in"
+type Scorecard {
+  "Sets the project is in: the set with no estate first, always present, then the set of each estate the project belongs to, by name, when the licence allows the estates"
+  sets: [ScorecardSet!]!
+}
+
+"The readings of a project in one set: with no estate, or for one estate it belongs to"
+type ScorecardSet {
+  "Estate of the set, null for the set with no estate"
+  estate: Estate
+  "Name of the set: Project for the set with no estate"
+  name: String!
+  "Project whose readings these are"
+  project: Project!
+  "Latest snapshot of each reading of the set, in the catalogue order. Empty until the readings are computed."
+  readings: [Reading!]!
+}
+
+"Number of search results for one type"
+type SearchFacet {
+  "True when this type has more results than its count, which is then the cap: shown as `1000+`"
+  capped: Boolean!
+  "Number of results for this type, at most the cap of the counts (`ontrack.config.search.count-cap`)"
+  count: Int!
+  "Type of result"
+  type: SearchResultType!
+}
+
+"Part of the highlighted free text of a search result. The parts, joined, are an excerpt of the text: plain text, whatever it contains, never markup."
+type SearchHighlightPart {
+  "True if this part matches the query"
+  match: Boolean!
+  "Part of the text"
+  text: String!
+}
+
 "Search result"
 type SearchResult {
   "Score for the search"
@@ -6595,21 +7526,12 @@ type SearchResult {
   data: JSON
   "Description linked to the item being found"
   description: String
-  "Web access point"
-  page: String @deprecated(reason : "Will be removed in V5. Use the generic type & data")
+  "Excerpt of the free text of the result - a description, a commit message - where it matches the query, as a sequence of parts, the matching ones flagged. Computed only when selected, and only for the results returned. Null when the result has no free text, or when its free text does not match any word of the query."
+  highlight: [SearchHighlightPart!]
   "Short title"
   title: String
   "Type of result"
   type: SearchResultType
-  "API access point"
-  uri: String @deprecated(reason : "Will be removed in V5. Use the generic type & data")
-}
-
-type SearchResultPaginated {
-  "Information about the current page"
-  pageInfo: PageInfo
-  "Items in the current page"
-  pageItems: [SearchResult!]!
 }
 
 "Type of search result"
@@ -6622,6 +7544,24 @@ type SearchResultType {
   id: String
   "Display name for the search result"
   name: String
+}
+
+"Results of a search"
+type SearchResults {
+  "True when the count of one of the types is capped: there are more results than the total"
+  capped: Boolean!
+  "Number of results per type, for the types having some"
+  facets: [SearchFacet!]!
+  "Results, best first"
+  items: [SearchResult!]!
+  "Message about the search, for example when the search index is being built"
+  message: String
+  "Information about the current page"
+  pageInfo: PageInfo @deprecated(reason : "Use total, and the offset and size arguments. Will be removed in 7.0.")
+  "Items in the current page"
+  pageItems: [SearchResult!]! @deprecated(reason : "Use items. Will be removed in 7.0.")
+  "Total number of results, for what the user can see: the sum of the counts of the facets"
+  total: Int!
 }
 
 type SelectDashboardPayload implements PayloadInterface {
@@ -6751,6 +7691,22 @@ type SetBranchReleaseValidationPropertyPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the setBuildAssistedChangePropertyById mutation."
+type SetBuildAssistedChangePropertyByIdPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the setBuildAssistedChangeProperty mutation."
+type SetBuildAssistedChangePropertyPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
 "Output type for the setBuildBitbucketPipelineRunPropertyById mutation."
 type SetBuildBitbucketPipelineRunPropertyByIdPayload implements Payload {
   "Build updated"
@@ -6777,6 +7733,22 @@ type SetBuildGitCommitPropertyByIdPayload implements Payload {
 
 "Output type for the setBuildGitCommitProperty mutation."
 type SetBuildGitCommitPropertyPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the setBuildGitLabPipelineRunPropertyById mutation."
+type SetBuildGitLabPipelineRunPropertyByIdPayload implements Payload {
+  "Build updated"
+  build: Build
+  "List of errors"
+  errors: [UserError]
+}
+
+"Output type for the setBuildGitLabPipelineRunProperty mutation."
+type SetBuildGitLabPipelineRunPropertyPayload implements Payload {
   "Build updated"
   build: Build
   "List of errors"
@@ -7079,6 +8051,38 @@ type SetProjectStalePropertyPayload implements Payload {
   project: Project
 }
 
+"Output type for the setPromotionLevelAgentsAdmittedPropertyById mutation."
+type SetPromotionLevelAgentsAdmittedPropertyByIdPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
+"Output type for the setPromotionLevelAgentsAdmittedProperty mutation."
+type SetPromotionLevelAgentsAdmittedPropertyPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
+"Output type for the setPromotionLevelAssistedBuildsRequirePropertyById mutation."
+type SetPromotionLevelAssistedBuildsRequirePropertyByIdPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
+"Output type for the setPromotionLevelAssistedBuildsRequireProperty mutation."
+type SetPromotionLevelAssistedBuildsRequirePropertyPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Promotion level updated"
+  promotionLevel: PromotionLevel
+}
+
 "Output type for the setPromotionLevelAutoPromotionPropertyById mutation."
 type SetPromotionLevelAutoPromotionPropertyByIdPayload implements Payload {
   "List of errors"
@@ -7277,6 +8281,22 @@ type SetValidationStampMetaInfoPropertyPayload implements Payload {
   validationStamp: ValidationStamp
 }
 
+"Output type for the setValidationStampNonAgentEvidencePropertyById mutation."
+type SetValidationStampNonAgentEvidencePropertyByIdPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Validation stamp updated"
+  validationStamp: ValidationStamp
+}
+
+"Output type for the setValidationStampNonAgentEvidenceProperty mutation."
+type SetValidationStampNonAgentEvidencePropertyPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Validation stamp updated"
+  validationStamp: ValidationStamp
+}
+
 "Output type for the setValidationStampPropertyById mutation."
 type SetValidationStampPropertyByIdPayload implements Payload {
   "List of errors"
@@ -7390,28 +8410,59 @@ type ShareSCMFileChangeFilterPayload implements Payload {
 }
 
 type Signature {
+  "The agent behind the signature, null for a person. The user name of an agent's signature is the agent's identifier."
+  actor: SignatureActor
   "ISO timestamp"
   time: String
   "User name"
   user: String
 }
 
+"The agent behind a signature. A person's signature has none."
+type SignatureActor {
+  "Identifier of the agent, `<slug>[agent]`"
+  agent: String!
+  "Display name of the agent, as it was when it acted"
+  displayName: String!
+  "Kind of actor - always `agent`, since a person's signature has no actor"
+  kind: String!
+  "Email of the person accountable for the agent when it acted"
+  owner: String!
+  "Opaque identifier of the agent session behind the action, if the agent gave one"
+  sessionId: String
+  "Link to the agent session behind the action, if the agent gave one"
+  sessionLink: String
+  "Tool behind the agent (Claude Code, Codex, ...), as it was when it acted"
+  tool: String
+}
+
 "Deployment slot into an environment"
 type Slot implements Authorizable {
   "List of configured admission rules for this slot"
   admissionRules: [SlotAdmissionRuleConfig!]!
+  "Does this slot admit agents? A registered agent may start, run and finish a deployment pipeline only in a slot which admits agents, and only if its owner may. An agent never satisfies a manual approval."
+  agentsAdmitted: Boolean
   "Authorizations for this context"
   authorizations: [Authorization!]!
+  "Does a slot upstream of this one in the project's slot graph hold a newer build?"
+  behind: Boolean!
+  "Is the in-flight deployment of this slot held up by a failing or pending, non-overridden admission rule or workflow? False when nothing is in flight. See blockingState to tell the two apart."
+  blocked: Boolean!
+  "How is the in-flight deployment of this slot held up? OK when it is not blocked, FAILED when one of its checks has failed, PENDING when it is only waiting for something expected to happen - a workflow running, an approval to give."
+  blockingState: SlotDeploymentCheckState!
   "Current pipeline in the slot"
   currentPipeline: SlotPipeline
   "description field"
   description: String
-  "Last eligible build for this slot"
-  eligibleBuild: Build
-  "Paginated list of eligible builds"
+  "Last build for this slot. By default, the last build which can be deployed now. With `deployable: false`, the last build which is merely eligible - a pipeline can be started for it, but it waits as a candidate until the admission rules accept it."
+  eligibleBuild(
+    "If true (the default), restricts the list of builds to the ones which can be deployed now. If false, returns all the eligible builds, including the ones which are not deployable yet."
+    deployable: Boolean = true
+  ): Build
+  "Paginated list of builds for this slot, newest first. By default, the builds which can be deployed now. With `deployable: false`, the builds which are merely eligible - a pipeline can be started for them, but it waits as a candidate until the admission rules accept it."
   eligibleBuilds(
-    "If true, restricts the list of builds to the ones which can actually be deployed."
-    deployable: Boolean,
+    "If true (the default), restricts the list of builds to the ones which can be deployed now. If false, returns all the eligible builds, including the ones which are not deployable yet."
+    deployable: Boolean = true,
     "Offset for the page"
     offset: Int = 0,
     "Size of the page"
@@ -7423,18 +8474,29 @@ type Slot implements Authorizable {
   id: ID!
   "Last deployed pipeline in the slot"
   lastDeployedPipeline: SlotPipeline
+  "Eligible builds newer than the one this slot holds, newest first"
+  nextBuilds(
+    "Maximum number of builds to return (defaults to 3)"
+    count: Int
+  ): [Build!]!
   "Paginated list of pipelines"
   pipelines(
     "Name of the branch to get the pipelines for"
     branchName: String,
     "Filtering on a build"
     buildId: Int,
+    "Filtering on the name of a build"
+    buildName: String,
     "Filtering on finished pipelines"
     done: Boolean,
     "Offset for the page"
     offset: Int = 0,
     "Size of the page"
-    size: Int = 20
+    size: Int = 20,
+    "Filtering on an exact status"
+    status: SlotPipelineStatus,
+    "Filtering on a user who acted on the deployment, anywhere in its audit trail"
+    user: String
   ): SlotPipelinePaginated
   "project field"
   project: Project!
@@ -7470,6 +8532,8 @@ type SlotAdmissionRuleConfig {
 }
 
 type SlotAdmissionRuleData {
+  "The agent behind the data, null for a person"
+  actor: SignatureActor
   "data field"
   data: JSON
   "timestamp field"
@@ -7485,6 +8549,8 @@ type SlotAdmissionRuleInput {
 }
 
 type SlotAdmissionRuleOverride {
+  "The agent behind the override, null for a person"
+  actor: SignatureActor
   "message field"
   message: JSON
   "timestamp field"
@@ -7507,6 +8573,8 @@ type SlotDeploymentCheck {
   ok: Boolean
   "reason field"
   reason: String
+  "OK, still pending - it blocks, but is expected to pass, like a running workflow - or failed"
+  state: SlotDeploymentCheckState!
 }
 
 "Graph of slots for a project"
@@ -7539,7 +8607,7 @@ type SlotPipeline {
   changes: [SlotPipelineChange!]!
   "end field"
   end: LocalDateTime
-  "Error message if any"
+  "Reason of the first failed check of the current phase, if any. A pending check - a workflow still running, an approval still to give - is not an error: see pendingMessage."
   errorMessage: String
   "Can this deployment be completed?"
   finishAction: SlotPipelineDeploymentStatusProgress
@@ -7551,6 +8619,8 @@ type SlotPipeline {
   lastChange: SlotPipelineChange
   "number field"
   number: Int
+  "Reason of the first pending check of the current phase - a workflow still running, an approval still to give - when no check has failed."
+  pendingMessage: String
   "List of required inputs for the admission rules"
   requiredInputs: [SlotAdmissionRuleInput!]!
   "Can this deployment be actioned into a running state?"
@@ -7583,6 +8653,8 @@ type SlotPipelineAdmissionRuleStatus {
 
 "Change happening to a pipeline"
 type SlotPipelineChange {
+  "The agent behind the change, null for a person"
+  actor: SignatureActor
   "id field"
   id: String!
   "message field"
@@ -7821,6 +8893,14 @@ type Token {
   value: String
 }
 
+"Output type for the transferAgent mutation."
+type TransferAgentPayload implements Payload {
+  "Transferred agent"
+  agent: Account
+  "List of errors"
+  errors: [UserError]
+}
+
 "Trigger for something"
 type Trigger {
   "displayName field"
@@ -7859,6 +8939,14 @@ type UnshareSCMFileChangeFilterPayload implements Payload {
   errors: [UserError]
 }
 
+"Output type for the updateAgent mutation."
+type UpdateAgentPayload implements Payload {
+  "Updated agent"
+  agent: Account
+  "List of errors"
+  errors: [UserError]
+}
+
 "Output type for the updateBuild mutation."
 type UpdateBuildPayload implements Payload {
   "Updated build"
@@ -7871,6 +8959,14 @@ type UpdateBuildPayload implements Payload {
 type UpdateConfigurationPayload implements Payload {
   "List of errors"
   errors: [UserError]
+}
+
+"Output type for the updateEstate mutation."
+type UpdateEstatePayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Updated estate"
+  estate: Estate
 }
 
 "Output type for the updateJenkinsConfiguration mutation."
@@ -7925,6 +9021,14 @@ type UpdatePromotionLevelByIdPayload implements Payload {
   promotionLevel: PromotionLevel
 }
 
+"Output type for the updateSlot mutation."
+type UpdateSlotPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "The updated slot"
+  slot: Slot
+}
+
 "Output type for the updateValidationStampById mutation."
 type UpdateValidationStampByIdPayload implements Payload {
   "List of errors"
@@ -7951,6 +9055,11 @@ type UpdateWebhookPayload implements Payload {
 type User {
   "Account associated to the user"
   account: Account
+  "For an agent, what it may do on a project: the rights of its owner narrowed by the agent policy - recording evidence, the promotion levels and the slots which admit agents. Read it before acting rather than discovering the policy by being refused. Null for a person."
+  agentPolicy(
+    "Name of the project"
+    project: String!
+  ): AgentPolicy
   "List of groups the user is assigned to"
   assignedGroups: [AccountGroup!]!
   "idpGroups field"
@@ -8043,6 +9152,14 @@ type ValidateBuildWithCHMLPayload implements Payload {
   validationRun: ValidationRun
 }
 
+"Output type for the validateBuildWithFindings mutation."
+type ValidateBuildWithFindingsPayload implements Payload {
+  "List of errors"
+  errors: [UserError]
+  "Created validation run"
+  validationRun: ValidationRun
+}
+
 "Output type for the validateBuildWithMetrics mutation."
 type ValidateBuildWithMetricsPayload implements Payload {
   "List of errors"
@@ -8099,6 +9216,8 @@ type ValidationDataTypeConfig {
   config: JSON
   "Descriptor for the validation data type"
   descriptor: ValidationDataTypeDescriptor
+  "Configuration object, in the shape expected by the edition forms and the mutations"
+  formConfig: JSON
 }
 
 "Descriptor for a validation data type"
@@ -8135,6 +9254,10 @@ type ValidationRun implements Authorizable & ProjectEntity {
     type: String
   ): [Decoration!]!
   description: String
+  "Evidences attached to the validation run, deleted ones included, in the order of their upload"
+  evidence: [Evidence!]!
+  "Security findings reported by this run, each with its observation by this run (the severity, the installed version, the acceptance), the most severe first. Empty for a run which is not a security scan, and for a user who is not granted the view of the findings of the project."
+  findings: [FindingObservation!]!
   id: ID!
   "List of information components attached to this entity"
   information: [EntityInformation!]!
@@ -8252,6 +9375,8 @@ type ValidationStamp implements Authorizable & ProjectEntity {
   "List of meta information properties"
   metaInfoProperty: Property
   name: String
+  "Evidence on this validation stamp must come from a non-agent actor: an agent may neither create a validation run on it nor change the status of one of its runs. Needs the licensed feature \"Agent governance\"."
+  nonAgentEvidenceProperty: Property
   "List of properties"
   properties(
     "Keeps properties having a value"
@@ -8301,8 +9426,6 @@ type VersionInfo {
   branch: String!
   "Git commit"
   commit: String!
-  "Creation date"
-  date: LocalDateTime @deprecated(reason : "Date field will be removed in V5")
   "Display version"
   display: String!
   "Full version"
@@ -8521,6 +9644,39 @@ type WorkflowValidation {
   errors: [String!]!
 }
 
+"Kind of an account: a person, or a registered agent"
+enum AccountKind {
+  "A registered agent: a non-human principal acting with its own API tokens, owned by a human account"
+  AGENT
+  "A person, logging in through the identity provider or using their own API tokens"
+  HUMAN
+}
+
+"How the assisted change of a build was obtained: COMPUTED by Yontrack from the change log, SET_BY_CI, or UNKNOWN when it could not be computed (see its reason)."
+enum AssistedChangeBasis {
+  COMPUTED
+  SET_BY_CI
+  UNKNOWN
+}
+
+"Whether the instance key can endorse the entries"
+enum AuditTrailKeyStatus {
+  "No usable key, and none could be generated: entries are written but not endorsed"
+  NOT_PROVISIONED
+  "The key is there: every entry is endorsed"
+  OK
+}
+
+"State of the evidence storage of the audit trail"
+enum AuditTrailStorageState {
+  "The storage properties are not all set: evidence cannot be attached"
+  NOT_CONFIGURED
+  "The bucket is reachable"
+  OK
+  "The bucket cannot be reached - service down, bucket missing, credentials refused: evidence cannot be attached"
+  UNREACHABLE
+}
+
 "List of ways the auto approval is managed."
 enum AutoApprovalMode {
   CLIENT
@@ -8572,6 +9728,15 @@ enum AutoVersioningPushMode {
   PUSH
 }
 
+"Where a build stands in a slot"
+enum BuildSlotJourneyState {
+  DEPLOYED
+  ELIGIBLE
+  IN_PROGRESS
+  NOT_ELIGIBLE
+  SUPERSEDED
+}
+
 "CHML values"
 enum CHML {
   CRITICAL
@@ -8585,13 +9750,6 @@ enum ChangeLogTemplatingCommitsOption {
   ALWAYS
   NONE
   OPTIONAL
-}
-
-"List of supported attribute types for configurable indicators"
-enum ConfigurableIndicatorAttributeType {
-  INT
-  REGEX
-  REQUIRED
 }
 
 "Type of result returned when checking a configuration"
@@ -8617,6 +9775,56 @@ enum DeliveryMapEdgeKind {
   EMITS
   REQUIRES
   UNLOCKS
+}
+
+"State of the exposure of a security finding on a branch, for the scans of one stamp. EXPOSED: reported by the latest scan without any acceptance holding. ACCEPTED: reported by the latest scan under an acceptance which holds. RESOLVED: no longer reported by the latest scan."
+enum FindingExposureState {
+  ACCEPTED
+  EXPOSED
+  RESOLVED
+}
+
+"Type of an entry in the history of a security finding. DISCOVERED: start of the first period of the first exposure of the finding. EXPOSED: start of the first period of an exposure on another branch or stamp. REOPENED: start of a later period of an exposure. RESOLVED: end of a period. ACCEPTED: first observation of a period under an acceptance. ACCEPTANCE_WITHDRAWN: observation without acceptance after accepted ones. ACCEPTANCE_EXPIRED: day after the last day of an acceptance, evaluated when read. OBSERVATIONS: consecutive observations of a period between two other entries."
+enum FindingHistoryEntryType {
+  ACCEPTANCE_EXPIRED
+  ACCEPTANCE_WITHDRAWN
+  ACCEPTED
+  DISCOVERED
+  EXPOSED
+  OBSERVATIONS
+  REOPENED
+  RESOLVED
+}
+
+"Kind of scan which reported a security finding."
+enum FindingKind {
+  CODE
+  DAST
+  DEPENDENCIES
+  IMAGE
+  OTHER
+  SECRETS
+}
+
+"Why a security finding was resolved on a branch. ABSENT: the latest scan of the stamp on the branch does not report it."
+enum FindingResolutionReason {
+  ABSENT
+}
+
+"Severity of a security finding, as asserted by a scanner. UNKNOWN is what a scanner gives when it has no severity to give."
+enum FindingSeverity {
+  CRITICAL
+  HIGH
+  LOW
+  MEDIUM
+  UNKNOWN
+}
+
+"State of a security finding in its project, rolled up from its exposure on the branches which count, or on one branch. OPEN: exposed without any acceptance holding. ACCEPTED: not open, but exposed under an acceptance which holds. RESOLVED: neither open nor accepted."
+enum FindingState {
+  ACCEPTED
+  OPEN
+  RESOLVED
 }
 
 "State a hook request can be in"
@@ -8675,6 +9883,12 @@ enum LicenseExpiration {
   ALMOST
   EXPIRED
   OK
+}
+
+"Kind of the event a delivery reading measures up to: PROMOTION (a promotion granted) or ENVIRONMENT (a deployment done in an environment)."
+enum MarkerKind {
+  ENVIRONMENT
+  PROMOTION
 }
 
 "List of types of messages"
@@ -8743,12 +9957,68 @@ enum QueueRecordState {
   STARTED
 }
 
+"Kind of a condition a build still lacks to reach a promotion level or a slot"
+enum ReadinessKind {
+  "An admission rule of the slot refuses the build, or does not allow it to be deployed yet"
+  ADMISSION_RULE
+  "The agent reading the readiness is not admitted on the promotion level or on the slot: its owner, or a person, must act. Only listed for an agent"
+  AGENT_POLICY
+  "A promotion check refuses the promotion, like a previous promotion condition or a promotion dependency"
+  CHECK
+  "A person must act: the promotion level is not auto promoted and is granted by a person, or the slot has a manual approval which has not been given"
+  MANUAL
+  "A promotion level required by the auto promotion of the level has not been reached by the build"
+  PROMOTION
+  "A validation stamp required by the auto promotion of the level has not passed on the build: validate it (again) to satisfy it"
+  VALIDATION
+}
+
+"What the value of a reading rests on: MEASURED from Yontrack's own data, ESTIMATED (never produced in 6.x) or UNKNOWN, with a reason."
+enum ReadingBasis {
+  ESTIMATED
+  MEASURED
+  UNKNOWN
+}
+
+"Which way a reading is better: LOWER_IS_BETTER (a target is met by a value lower than or equal to it) or HIGHER_IS_BETTER (a target is met by a value higher than or equal to it)."
+enum ReadingDirection {
+  HIGHER_IS_BETTER
+  LOWER_IS_BETTER
+}
+
+"Why a reading is unknown: NO_MARKER (no promotion level on the branches in scope, or no slot of the project in the marker environment), NO_SAMPLES (nothing to measure in the window: nothing reached the marker, or no CRITICAL or HIGH finding was resolved), NO_FAILURE (time to restore with no failure in the window), NO_TEST_STAMP (no test stamp on the branches in scope), NOT_LICENSED (environment marker without the environments licence), NO_TARGET (overdue findings with no remediation target: no estate, or an estate with neither a CRITICAL nor a HIGH target)."
+enum ReadingUnknownReason {
+  NOT_LICENSED
+  NO_FAILURE
+  NO_MARKER
+  NO_SAMPLES
+  NO_TARGET
+  NO_TEST_STAMP
+}
+
+"Kind of marker naming an assistant on a commit: CO_AUTHOR (a Co-Authored-By trailer with an agent's email), ASSISTED_BY (an Assisted-by trailer), SESSION_TRAILER (a session trailer such as Claude-Session), TRAILER (a trailer named by an agent marker pattern), AUTHOR (the email or login of the author), COMMITTER (the login of the committer)."
+enum SCMCommitAssistantMarker {
+  ASSISTED_BY
+  AUTHOR
+  COMMITTER
+  CO_AUTHOR
+  SESSION_TRAILER
+  TRAILER
+}
+
 "Status of a pull request"
 enum SCMPullRequestStatus {
   DECLINED
   MERGED
   OPEN
   UNKNOWN
+}
+
+"State of a deployment check: OK, still pending (it blocks, but is expected to pass), or failed"
+enum SlotDeploymentCheckState {
+  FAILED
+  OK
+  PENDING
 }
 
 "Type of change in a deployment"
@@ -8764,6 +10034,7 @@ enum SlotPipelineStatus {
   CANCELLED
   CANDIDATE
   DONE
+  FAILED
   RUNNING
 }
 
@@ -8772,6 +10043,18 @@ enum ThemeMode {
   DARK
   LIGHT
   SYSTEM
+}
+
+"Check of the verification of a trail which failed: SEQ, SCHEMA_VERSION, HASH, PREVIOUS_HASH, FIRST_ENTRY and BUILD break its chain; ENDORSEMENT and UNKNOWN_KEY invalidate an endorsement."
+enum TrailVerificationProblemType {
+  BUILD
+  ENDORSEMENT
+  FIRST_ENTRY
+  HASH
+  PREVIOUS_HASH
+  SCHEMA_VERSION
+  SEQ
+  UNKNOWN_KEY
 }
 
 "Defines how validation runs should be sorted"
@@ -8953,6 +10236,10 @@ input AutoVersioningTrailFilter {
 
 "BuildSearchForm"
 input BuildSearchForm {
+  "Actor who created the build: `HUMAN` for a person, `AGENT` for any agent, or the identifier of one agent, `<slug>[agent]`. Case-insensitive."
+  actor: String
+  "Whether the commits of the build were written with assistants, from its assisted change: `YES`, `NO`, or `UNKNOWN` for a build whose assisted change is absent or could not be computed. Case-insensitive."
+  assisted: String
   "Regular expression to match against the branch name."
   branchName: String
   "When `buildName` is set, considers an exact match on the build name."
@@ -9014,6 +10301,8 @@ input CIEnv {
 
 "Input type for the cancelSlotPipeline mutation."
 input CancelSlotPipelineInput {
+  "Date/time of the action, to backdate it. Defaults to now. Not in the future, not before the creation of the build, not before the previous change of the pipeline."
+  dateTime: LocalDateTime
   "pipelineId field"
   pipelineId: String!
   "reason field"
@@ -9024,6 +10313,10 @@ input CancelSlotPipelineInput {
 input ChangeLogTemplatingServiceConfig {
   "Loop over all qualifiers for the last level of `dependencies`, including the default one. Qualifiers at `dependencies` take precedence."
   allQualifiers: Boolean
+  "If true, each commit line is followed by the assistants (agent kinds) which helped write the commit, e.g. `(assisted by Claude Code)`, the name of an assistant linking to its agent session when the commit carries one (Markdown and HTML only). Applies only when the commits are rendered (see `commitsOption`)."
+  assistants: Boolean
+  "If true, the change log starts with the number of its commits written with an assistant, e.g. `3 of 12 commits assisted`. Nothing is added when the change log has no commit."
+  assistedCount: Boolean
   "Maximum length of a commit message in a change log, ellipsis included. Only the first line of a commit message is ever rendered; set this to 0 to render that line in full."
   commitsMaxLength: Int
   "Defines how to render commits for a change log"
@@ -9184,6 +10477,22 @@ input CreateEnvironmentInput {
   tags: [String!]
 }
 
+"Input type for the createEstate mutation."
+input CreateEstateInput {
+  "Description of the estate"
+  description: String
+  "Labels selecting the projects, as category:name or name. At least one; a project must carry all of them."
+  labels: [String!]!
+  "Marker the delivery readings are read up to. Null for the default marker."
+  marker: EstateMarkerInput
+  "Unique name of the estate"
+  name: String!
+  "Window override and target per reading, at most one per reading"
+  readings: [EstateReadingConfigInput!]
+  "What the estate expects of the security scans of its projects. Null for no expectation."
+  security: EstateSecurityInput
+}
+
 "Input type for the createGitHubConfiguration mutation."
 input CreateGitHubConfigurationInput {
   "ID of the GitHub App to use for authentication"
@@ -9198,12 +10507,14 @@ input CreateGitHubConfigurationInput {
   name: String!
   "Personal Access Token"
   oauth2Token: String
-  "Password for authentication"
+  "Password for authentication. Deprecated: use a token or a GitHub App instead."
   password: String
   "GitHub server URL. Null will be replaced by https://github.com"
   url: String
   "User name for authentication"
   user: String
+  "Whether to pass the id input to the dispatched workflows, to find their run when GitHub does not return it. Defaults to false."
+  workflowSendId: Boolean
 }
 
 "Input type for the createJenkinsConfiguration mutation."
@@ -9450,6 +10761,12 @@ input DeleteAccountInput {
   accountId: Int!
 }
 
+"Input type for the deleteAgent mutation."
+input DeleteAgentInput {
+  "ID of the agent"
+  id: Int!
+}
+
 "Input type for the deleteAutoVersioningConfig mutation."
 input DeleteAutoVersioningConfigInput {
   "ID of the branch to clean"
@@ -9518,6 +10835,22 @@ input DeleteBranchReleaseValidationPropertyInput {
   project: String!
 }
 
+"Input type for the deleteBuildAssistedChangePropertyById mutation."
+input DeleteBuildAssistedChangePropertyByIdInput {
+  "ID of the build"
+  id: Int!
+}
+
+"Input type for the deleteBuildAssistedChangeProperty mutation."
+input DeleteBuildAssistedChangePropertyInput {
+  "Branch name"
+  branch: String!
+  "Build name"
+  build: String!
+  "Project name"
+  project: String!
+}
+
 "Input type for the deleteBuildBitbucketPipelineRunPropertyById mutation."
 input DeleteBuildBitbucketPipelineRunPropertyByIdInput {
   "ID of the build"
@@ -9556,6 +10889,22 @@ input DeleteBuildGitCommitPropertyByIdInput {
 
 "Input type for the deleteBuildGitCommitProperty mutation."
 input DeleteBuildGitCommitPropertyInput {
+  "Branch name"
+  branch: String!
+  "Build name"
+  build: String!
+  "Project name"
+  project: String!
+}
+
+"Input type for the deleteBuildGitLabPipelineRunPropertyById mutation."
+input DeleteBuildGitLabPipelineRunPropertyByIdInput {
+  "ID of the build"
+  id: Int!
+}
+
+"Input type for the deleteBuildGitLabPipelineRunProperty mutation."
+input DeleteBuildGitLabPipelineRunPropertyInput {
   "Branch name"
   branch: String!
   "Build name"
@@ -9645,6 +10994,18 @@ input DeleteDeploymentInput {
 input DeleteEnvironmentInput {
   "ID of the environment to delete"
   id: String!
+}
+
+"Input type for the deleteEstate mutation."
+input DeleteEstateInput {
+  "ID of the estate"
+  id: Int!
+}
+
+"Input type for the deleteEvidence mutation."
+input DeleteEvidenceInput {
+  "ID of the evidence to delete"
+  id: Int!
 }
 
 "Input type for the deleteGenericProperty mutation."
@@ -9847,6 +11208,38 @@ input DeleteProjectStalePropertyByIdInput {
 input DeleteProjectStalePropertyInput {
   "Project name"
   project: String!
+}
+
+"Input type for the deletePromotionLevelAgentsAdmittedPropertyById mutation."
+input DeletePromotionLevelAgentsAdmittedPropertyByIdInput {
+  "ID of the promotion level"
+  id: Int!
+}
+
+"Input type for the deletePromotionLevelAgentsAdmittedProperty mutation."
+input DeletePromotionLevelAgentsAdmittedPropertyInput {
+  "Branch name"
+  branch: String!
+  "Project name"
+  project: String!
+  "Promotion name"
+  promotion: String!
+}
+
+"Input type for the deletePromotionLevelAssistedBuildsRequirePropertyById mutation."
+input DeletePromotionLevelAssistedBuildsRequirePropertyByIdInput {
+  "ID of the promotion level"
+  id: Int!
+}
+
+"Input type for the deletePromotionLevelAssistedBuildsRequireProperty mutation."
+input DeletePromotionLevelAssistedBuildsRequirePropertyInput {
+  "Branch name"
+  branch: String!
+  "Project name"
+  project: String!
+  "Promotion name"
+  promotion: String!
 }
 
 "Input type for the deletePromotionLevelAutoPromotionPropertyById mutation."
@@ -10055,6 +11448,22 @@ input DeleteValidationStampMetaInfoPropertyInput {
   validation: String!
 }
 
+"Input type for the deleteValidationStampNonAgentEvidencePropertyById mutation."
+input DeleteValidationStampNonAgentEvidencePropertyByIdInput {
+  "ID of the validation stamp"
+  id: Int!
+}
+
+"Input type for the deleteValidationStampNonAgentEvidenceProperty mutation."
+input DeleteValidationStampNonAgentEvidencePropertyInput {
+  "Branch name"
+  branch: String!
+  "Project name"
+  project: String!
+  "Validation name"
+  validation: String!
+}
+
 "Input type for the deleteWebhook mutation."
 input DeleteWebhookInput {
   "Name of the webhook to delete"
@@ -10128,6 +11537,70 @@ input EnvironmentFilter {
   tags: [String!]
 }
 
+input EnvironmentMatrixFilter {
+  "activity field"
+  activity: Boolean
+  "environments field"
+  environments: [String!]
+  "favourites field"
+  favourites: Boolean
+  "label field"
+  label: Int
+  "project field"
+  project: String
+  "projects field"
+  projects: [String!]
+  "tags field"
+  tags: [String!]
+}
+
+input EstateMarkerInput {
+  "For an ENVIRONMENT marker, name of the environment"
+  environment: String
+  "Kind of marker"
+  kind: MarkerKind!
+  "For a PROMOTION marker, name of the promotion level"
+  levelName: String
+  "For an ENVIRONMENT marker, qualifier of the slots read, empty or null for the default one"
+  qualifier: String
+}
+
+input EstateReadingConfigInput {
+  "Key of the reading, like delivery.leadTime"
+  key: String!
+  "Threshold the reading is judged against, in the unit of the reading, null for none"
+  target: Float
+  "Number of days the reading is taken over, null for the window of the settings"
+  windowDays: Int
+}
+
+input EstateSecurityInput {
+  "Number of days a CRITICAL finding may stay open, null for no target"
+  criticalTargetDays: Int
+  "Kinds of scan every project must have run, each fresher than the freshness, to be covered. Null or empty: any fresh scan covers a project."
+  expectedKinds: [FindingKind!]
+  "Number of days a scan stays fresh, null for the freshness of the settings"
+  freshnessDays: Int
+  "Number of days a HIGH finding may stay open, null for no target"
+  highTargetDays: Int
+}
+
+"Filter on the events of the instance. Every criterion is optional, and they are combined."
+input EventFilterInput {
+  "Actor of the event: `agent` for the events of the agents, `human` for the events of the persons, or the identifier of one agent, `<slug>[agent]`. Case-insensitive."
+  actor: String
+  "IDs of the event types to keep - empty or absent for all the types"
+  eventTypes: [String!]
+  "Events at or after this time (UTC, inclusive)"
+  from: LocalDateTime
+  "Name of a project, matching the event's project or its extra project. An unknown name returns no event."
+  project: String
+  "Events at or before this time (UTC, inclusive)"
+  to: LocalDateTime
+  "Case-insensitive prefix of the name of the user who posted the event"
+  user: String
+}
+
 input EventSubscriptionFilter {
   "Filter against the channel type (exact match)"
   channel: String
@@ -10145,6 +11618,16 @@ input EventSubscriptionFilter {
   recursive: Boolean
 }
 
+"Input type for the failSlotPipeline mutation."
+input FailSlotPipelineInput {
+  "Date/time of the action, to backdate it. Defaults to now. Not in the future, not before the creation of the build, not before the previous change of the pipeline."
+  dateTime: LocalDateTime
+  "Optional message recorded in the pipeline's history"
+  message: String
+  "ID of the running pipeline to mark as failed"
+  pipelineId: String!
+}
+
 "Input type for the favouriteBranch mutation."
 input FavouriteBranchInput {
   "Branch ID"
@@ -10157,14 +11640,37 @@ input FavouriteProjectInput {
   id: Int!
 }
 
+input FindingFilter {
+  "Name of a branch the finding has been exposed on, resolved or not. The state then applies to this branch."
+  branch: String
+  "Kind of scan which reported the finding"
+  kind: FindingKind
+  "Name of the scanner which reported the finding"
+  scanner: String
+  "Maximum severity of the finding across its observations"
+  severity: FindingSeverity
+  "State of the finding: in the project, or on the branch when one is given"
+  state: FindingState
+}
+
 "Input type for the finishSlotPipelineDeployment mutation."
 input FinishSlotPipelineDeploymentInput {
+  "Date/time of the action, to backdate it. Defaults to now. Not in the future, not before the creation of the build, not before the previous change of the pipeline."
+  dateTime: LocalDateTime
   "forcing field"
   forcing: Boolean!
   "message field"
   message: String
   "pipelineId field"
   pipelineId: String!
+}
+
+"Input type for the generateAgentToken mutation."
+input GenerateAgentTokenInput {
+  "ID of the agent"
+  id: Int!
+  "Name of the token, unique for the agent"
+  name: String!
 }
 
 "Input type for the generateToken mutation."
@@ -10610,6 +12116,32 @@ input QueueRecordingFilterInput {
   username: String
 }
 
+"Input type for the recomputeEstate mutation."
+input RecomputeEstateInput {
+  "ID of the estate"
+  id: Int!
+}
+
+"Input type for the recomputeProjectScorecard mutation."
+input RecomputeProjectScorecardInput {
+  "ID of the project"
+  projectId: Int!
+}
+
+"Input type for the registerAgent mutation."
+input RegisterAgentInput {
+  "Optional description of the agent"
+  description: String
+  "Display name of the agent"
+  displayName: String!
+  "Email of the owner of the agent. The current user when not set; only an administrator can give another owner."
+  owner: String
+  "Slug of the agent: 1 to 32 lowercase letters, digits or dashes. The agent is identified as `<slug>[agent]`, and the slug never changes."
+  slug: String!
+  "Tool behind the agent: Claude Code, Codex, Copilot, Devin, Other, or any other name"
+  tool: String!
+}
+
 "Input type for the renameSubscription mutation."
 input RenameSubscriptionInput {
   "Name of the subscription to rename"
@@ -10658,6 +12190,20 @@ input RescheduleAutoVersioningInput {
 input RevokeAccountTokensInput {
   "accountId field"
   accountId: Int!
+}
+
+"Input type for the revokeAgentToken mutation."
+input RevokeAgentTokenInput {
+  "ID of the agent"
+  id: Int!
+  "Name of the token"
+  name: String!
+}
+
+"Input type for the revokeAllAgentTokens mutation."
+input RevokeAllAgentTokensInput {
+  "ID of the agent"
+  id: Int!
 }
 
 "Input type for the revokeToken mutation."
@@ -10956,6 +12502,50 @@ input SetBranchReleaseValidationPropertyInput {
   validation: String!
 }
 
+"Input type for the setBuildAssistedChangePropertyById mutation."
+input SetBuildAssistedChangePropertyByIdInput {
+  "Distinct names of the assistants, sorted. The build is assisted when there is at least one."
+  assistants: [String!]
+  "Number of commits written with an assistant."
+  assistedCommits: Int
+  "How the value was obtained, SET_BY_CI by default"
+  basis: AssistedChangeBasis
+  "ID of the build"
+  id: Int!
+  "ID of the build the change log was computed from, if any."
+  previousBuildId: Int
+  "Distinct links to the agent sessions behind the commits, at most 20."
+  sessionLinks: [String!]
+  "Number of commits in the change of the build."
+  totalCommits: Int
+  "Why the value is unknown, when the basis is UNKNOWN: no SCM, no previous build with a commit, or the SCM error."
+  unknownReason: String
+}
+
+"Input type for the setBuildAssistedChangeProperty mutation."
+input SetBuildAssistedChangePropertyInput {
+  "Distinct names of the assistants, sorted. The build is assisted when there is at least one."
+  assistants: [String!]
+  "Number of commits written with an assistant."
+  assistedCommits: Int
+  "How the value was obtained, SET_BY_CI by default"
+  basis: AssistedChangeBasis
+  "Branch name"
+  branch: String!
+  "Build name"
+  build: String!
+  "ID of the build the change log was computed from, if any."
+  previousBuildId: Int
+  "Project name"
+  project: String!
+  "Distinct links to the agent sessions behind the commits, at most 20."
+  sessionLinks: [String!]
+  "Number of commits in the change of the build."
+  totalCommits: Int
+  "Why the value is unknown, when the basis is UNKNOWN: no SCM, no previous build with a commit, or the SCM error."
+  unknownReason: String
+}
+
 "Input type for the setBuildBitbucketPipelineRunPropertyById mutation."
 input SetBuildBitbucketPipelineRunPropertyByIdInput {
   "Number of the pipeline run"
@@ -11006,6 +12596,38 @@ input SetBuildGitCommitPropertyInput {
   commit: String!
   "Project name"
   project: String!
+}
+
+"Input type for the setBuildGitLabPipelineRunPropertyById mutation."
+input SetBuildGitLabPipelineRunPropertyByIdInput {
+  "ID of the build"
+  id: Int!
+  "ID of the pipeline, unique across the GitLab instance"
+  pipelineId: Long!
+  "IID of the pipeline, its number inside the project"
+  pipelineIid: Int!
+  "Path of the GitLab project, subgroups included"
+  projectPath: String!
+  "Link to the pipeline"
+  url: String!
+}
+
+"Input type for the setBuildGitLabPipelineRunProperty mutation."
+input SetBuildGitLabPipelineRunPropertyInput {
+  "Branch name"
+  branch: String!
+  "Build name"
+  build: String!
+  "ID of the pipeline, unique across the GitLab instance"
+  pipelineId: Long!
+  "IID of the pipeline, its number inside the project"
+  pipelineIid: Int!
+  "Project name"
+  project: String!
+  "Path of the GitLab project, subgroups included"
+  projectPath: String!
+  "Link to the pipeline"
+  url: String!
 }
 
 "Input type for the setBuildMessagePropertyById mutation."
@@ -11476,6 +13098,46 @@ input SetProjectStalePropertyInput {
   promotionsToKeep: [String!]
 }
 
+"Input type for the setPromotionLevelAgentsAdmittedPropertyById mutation."
+input SetPromotionLevelAgentsAdmittedPropertyByIdInput {
+  "Agents are admitted when the property is set and this flag is true (the default)"
+  admitted: Boolean
+  "ID of the promotion level"
+  id: Int!
+}
+
+"Input type for the setPromotionLevelAgentsAdmittedProperty mutation."
+input SetPromotionLevelAgentsAdmittedPropertyInput {
+  "Agents are admitted when the property is set and this flag is true (the default)"
+  admitted: Boolean
+  "Branch name"
+  branch: String!
+  "Project name"
+  project: String!
+  "Promotion name"
+  promotion: String!
+}
+
+"Input type for the setPromotionLevelAssistedBuildsRequirePropertyById mutation."
+input SetPromotionLevelAssistedBuildsRequirePropertyByIdInput {
+  "ID of the promotion level"
+  id: Int!
+  "Names of the validation stamps of the branch which an assisted build must pass before being promoted to this level"
+  validationStamps: [String!]!
+}
+
+"Input type for the setPromotionLevelAssistedBuildsRequireProperty mutation."
+input SetPromotionLevelAssistedBuildsRequirePropertyInput {
+  "Branch name"
+  branch: String!
+  "Project name"
+  project: String!
+  "Promotion name"
+  promotion: String!
+  "Names of the validation stamps of the branch which an assisted build must pass before being promoted to this level"
+  validationStamps: [String!]!
+}
+
 "Input type for the setPromotionLevelAutoPromotionPropertyById mutation."
 input SetPromotionLevelAutoPromotionPropertyByIdInput {
   "When enabled, the promotion is revoked as soon as one of its prerequisites - a required validation stamp or a required promotion - is no longer valid. Revoking a promotion deletes it, but does not undo its effects: any notification or workflow already triggered by the promotion remains fired. Defaults to false when absent."
@@ -11802,6 +13464,26 @@ input SetValidationStampMetaInfoPropertyInput {
   validation: String!
 }
 
+"Input type for the setValidationStampNonAgentEvidencePropertyById mutation."
+input SetValidationStampNonAgentEvidencePropertyByIdInput {
+  "The restriction applies when the property is set and this flag is true (the default)"
+  enabled: Boolean
+  "ID of the validation stamp"
+  id: Int!
+}
+
+"Input type for the setValidationStampNonAgentEvidenceProperty mutation."
+input SetValidationStampNonAgentEvidencePropertyInput {
+  "Branch name"
+  branch: String!
+  "The restriction applies when the property is set and this flag is true (the default)"
+  enabled: Boolean
+  "Project name"
+  project: String!
+  "Validation name"
+  validation: String!
+}
+
 "Input type for the setValidationStampPropertyById mutation."
 input SetValidationStampPropertyByIdInput {
   "ID of the validation stamp"
@@ -11840,6 +13522,8 @@ input SetupCHMLValidationStampInput {
   validation: String!
   "Level needed to raise a warning"
   warningLevel: CHMLLevel!
+  "If true, a run in WARNING status counts as passed for the auto promotion. Defaults to false."
+  warningPassesAutoPromotion: Boolean
 }
 
 "Input type for the setupMetricsValidationStamp mutation."
@@ -11969,8 +13653,12 @@ input SlotPipelineDataInputValue {
 }
 
 input StandardBuildFilter {
+  "Actor who created the build: `HUMAN` for a person, `AGENT` for any agent, or the identifier of one agent, `<slug>[agent]`. Case-insensitive."
+  actor: String
   "Build created after or on this date"
   afterDate: String
+  "Whether the commits of the build were written with assistants, from its assisted change: `YES`, `NO`, or `UNKNOWN` for a build whose assisted change is absent or could not be computed. Case-insensitive."
+  assisted: String
   "Build created before or on this date"
   beforeDate: String
   "Maximum number of builds to display"
@@ -12018,6 +13706,8 @@ input StandardBuildFilter {
 
 "Input type for the startSlotPipelineDeployment mutation."
 input StartSlotPipelineDeploymentInput {
+  "Date/time of the action, to backdate it. Defaults to now. Not in the future, not before the creation of the build, not before the previous change of the pipeline."
+  dateTime: LocalDateTime
   "pipelineId field"
   pipelineId: String!
 }
@@ -12026,6 +13716,8 @@ input StartSlotPipelineDeploymentInput {
 input StartSlotPipelineInput {
   "buildId field"
   buildId: Int!
+  "Start of the pipeline - and of its whole deployment when forcing it to done. Defaults to now. Not in the future, not before the creation of the build, not before the start of the slot's latest pipeline."
+  dateTime: LocalDateTime
   "forceDone field"
   forceDone: Boolean
   "forceDoneMessage field"
@@ -12056,8 +13748,8 @@ input SubscribeBranchToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
 }
@@ -12078,8 +13770,8 @@ input SubscribeBuildToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
 }
@@ -12096,8 +13788,8 @@ input SubscribeProjectToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
 }
@@ -12116,8 +13808,8 @@ input SubscribePromotionLevelToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
   "Promotion name"
@@ -12140,8 +13832,8 @@ input SubscribePromotionRunToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
   "Promotion name"
@@ -12160,8 +13852,8 @@ input SubscribeToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Target project entity (null for global events)"
   projectEntity: ProjectEntityIDInput
 }
@@ -12182,8 +13874,8 @@ input SubscribeValidationRunToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
   "Run name"
@@ -12206,8 +13898,8 @@ input SubscribeValidationStampToEventsInput {
   events: [String!]!
   "Optional space-separated list of tokens to look for in the events"
   keywords: String
-  "Unique name of the channel in its scope (null for backward compatibility, will be required in V5)"
-  name: String
+  "Unique name of the subscription in its scope"
+  name: String!
   "Project name"
   project: String!
   "Validation name"
@@ -12242,6 +13934,14 @@ input TestWebhookInput {
   name: String!
 }
 
+"Input type for the transferAgent mutation."
+input TransferAgentInput {
+  "ID of the agent"
+  id: Int!
+  "Email of the new owner, a person"
+  owner: String!
+}
+
 "Input type for the unfavouriteBranch mutation."
 input UnfavouriteBranchInput {
   "Branch ID"
@@ -12260,6 +13960,18 @@ input UnshareSCMFileChangeFilterInput {
   name: String!
   "ID of the project"
   projectId: Int!
+}
+
+"Input type for the updateAgent mutation."
+input UpdateAgentInput {
+  "Optional description of the agent"
+  description: String
+  "Display name of the agent"
+  displayName: String!
+  "ID of the agent"
+  id: Int!
+  "Tool behind the agent"
+  tool: String!
 }
 
 "Input type for the updateBuild mutation."
@@ -12282,6 +13994,24 @@ input UpdateConfigurationInput {
   name: String!
   "type field"
   type: String!
+}
+
+"Input type for the updateEstate mutation."
+input UpdateEstateInput {
+  "Description of the estate"
+  description: String
+  "ID of the estate"
+  id: Int!
+  "Labels selecting the projects, as category:name or name. At least one; a project must carry all of them."
+  labels: [String!]!
+  "Marker the delivery readings are read up to. Null for the default marker."
+  marker: EstateMarkerInput
+  "Unique name of the estate"
+  name: String!
+  "Window override and target per reading, at most one per reading"
+  readings: [EstateReadingConfigInput!]
+  "What the estate expects of the security scans of its projects. Null for no expectation."
+  security: EstateSecurityInput
 }
 
 "Input type for the updateJenkinsConfiguration mutation."
@@ -12362,6 +14092,16 @@ input UpdatePromotionLevelByIdInput {
   id: Int!
   "Promotion level name"
   name: String!
+}
+
+"Input type for the updateSlot mutation."
+input UpdateSlotInput {
+  "Does the slot admit agents? Left out, the setting is kept."
+  agentsAdmitted: Boolean
+  "New description of the slot. Left out, the description is kept."
+  description: String
+  "ID of the slot"
+  slotId: String!
 }
 
 "Input type for the updateValidationStampById mutation."
@@ -12514,6 +14254,32 @@ input ValidateBuildWithCHMLInput {
   runInfo: RunInfoInput
   "Status of the validation run"
   status: String
+  "Name of the validation stamp"
+  validation: String!
+}
+
+"Input type for the validateBuildWithFindings mutation."
+input ValidateBuildWithFindingsInput {
+  "Name of the branch"
+  branch: String!
+  "Name of the build"
+  build: String!
+  "Time of the scan, the moment of the call when not given. Dates the run, and with it the observations, the exposure and the resolution of the findings."
+  dateTime: LocalDateTime
+  "Description of the validation run"
+  description: String
+  "Format of the report. `findings` is the neutral format of Yontrack. `sarif` (SARIF 2.1) and `trivy` (Trivy JSON, vulnerabilities only) are native scanner formats, which need the licensed feature \"Native scanner formats\"."
+  format: String!
+  "Kind of scan. Takes precedence over the kind given by the report, if any."
+  kind: FindingKind
+  "Name of the project"
+  project: String!
+  "Report of the scan, as JSON"
+  report: JSON!
+  "Optional run info to associated with this validation run"
+  runInfo: RunInfoInput
+  "Name of the scanner. Takes precedence over the scanner given by the report, if any."
+  scanner: String
   "Name of the validation stamp"
   validation: String!
 }
