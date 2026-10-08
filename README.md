@@ -1169,6 +1169,42 @@ No new command: [`build search`](#searching-for-builds) answers it already. For 
 yontrack build search --project my-library --with-promotion GOLD --count 5
 ```
 
+## Assisted change
+
+Yontrack records on each build whether its change - the commits since the previous build - was written with assistants (coding agents), how many of its commits, and the links to their sessions. It computes this itself when the project has an SCM. Without one, the CI sets it with `build assisted`, either from git:
+
+```bash
+yontrack build assisted --project my-project --branch main --build 42 --from-git <previous-commit>..<commit>
+```
+
+or explicitly:
+
+```bash
+yontrack build assisted --project my-project --branch main --build 42 \
+    --assistants "Claude Code,Codex" --assisted-commits 3 --total-commits 5 \
+    --session-link https://claude.ai/code/session_01J9Z3...
+```
+
+`--from-git` and the explicit flags are mutually exclusive, and one of them is required. In the explicit form, `--total-commits` is required, and `--session-link` can be repeated.
+
+`--from-git` takes an explicit range only: the previous commit is not looked up in Yontrack, since the CI knows it - `github.event.before` on GitHub Actions, `CI_COMMIT_BEFORE_SHA` on GitLab CI. The command runs `git log` on the range, in the current directory, so `git` must be installed and the clone deep enough for both commits. Every commit of the range counts, merges included, and the assistants are recognised exactly as Yontrack does:
+
+* the `Co-Authored-By` trailers of `noreply@anthropic.com` (Claude Code), `codex@openai.com` (Codex) and `copilot@github.com` (Copilot), and the author email `copilot@github.com`;
+* `Assisted-by: <name>` - with the kernel style `NAME:MODEL`, the part before the first `:`;
+* `Claude-Session: <url>` - Claude Code, with the link to the session;
+* the author or committer names `copilot-swe-agent[bot]` (Copilot) and `devin-ai-integration[bot]` (Devin);
+* the custom patterns of the _Agent markers_ settings of Yontrack.
+
+Trailers are read from the last paragraph of the message only, and only when it has more than one paragraph.
+
+> Reading the custom patterns needs a token allowed to read the global settings - an administrator's - until
+> [yontrack/yontrack#2044](https://github.com/yontrack/yontrack/issues/2044) allows it for the tokens which create
+> builds and for agents. Without it, the command applies the built-in conventions only, and warns that the custom
+> patterns were not. A pattern whose regular expression Go cannot compile - a lookaround, for example - is skipped
+> with a warning too.
+
+The value is set even when no commit was assisted - `--total-commits 5` alone, or a range without any assistant: that the CI looked and found none is a fact, while a build without the value counts as assisted.
+
 # Misc
 
 ## Direct GraphQL calls

@@ -26,6 +26,9 @@ client/
   ontrackGraphQLClient.go  # GraphQLCall(), CheckDataErrors()
 config/
   configService.go  # Config struct, GetSelectedConfiguration()
+assistants/
+  assistants.go  # Assistants of a commit: a port of Yontrack's SCMCommitAssistants.kt, keep them in sync
+  git.go         # GitLog(): the commits of a range, from `git log`
 main.go
 ontrack.graphql   # Full Ontrack GraphQL schema (reference only)
 ```

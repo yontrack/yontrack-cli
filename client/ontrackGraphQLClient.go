@@ -55,14 +55,8 @@ func GraphQLCall(cfg *config.Config, query string, variables map[string]interfac
 	}
 
 	// Management of errors
-	if result.Errors != nil {
-		if len(result.Errors) > 0 {
-			var message string
-			for index, error := range result.Errors {
-				message += fmt.Sprintf("%d) %s\n", index+1, error.Message)
-			}
-			return errors.New(message)
-		}
+	if len(result.Errors) > 0 {
+		return &graphQLErrors{errors: result.Errors}
 	}
 
 	// OK
@@ -101,7 +95,39 @@ func newClient(cfg *config.Config) *resty.Client {
 }
 
 type graphErr struct {
-	Message string
+	Message    string
+	Extensions struct {
+		// Kind of error, like FORBIDDEN when the call is not granted
+		Classification string
+	}
+}
+
+// graphQLErrors are the errors of a GraphQL response.
+type graphQLErrors struct {
+	errors []graphErr
+}
+
+func (e *graphQLErrors) Error() string {
+	var message string
+	for index, error := range e.errors {
+		message += fmt.Sprintf("%d) %s\n", index+1, error.Message)
+	}
+	return message
+}
+
+// IsForbidden tells whether Yontrack refused a GraphQL call because it is not
+// granted: an access denied, or the policy of an agent.
+func IsForbidden(err error) bool {
+	var graphQL *graphQLErrors
+	if !errors.As(err, &graphQL) {
+		return false
+	}
+	for _, error := range graphQL.errors {
+		if error.Extensions.Classification == "FORBIDDEN" {
+			return true
+		}
+	}
+	return false
 }
 
 type graphResponse struct {
