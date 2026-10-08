@@ -16,11 +16,14 @@ func ValidateWithTests(
 	skipped int,
 	failed int,
 	status *string,
-) error {
+) (string, error) {
 
 	// Mutation payload
 	var payload struct {
 		ValidateBuildWithTests struct {
+			ValidationRun struct {
+				Id string
+			}
 			Errors []struct {
 				Message string
 			}
@@ -53,6 +56,9 @@ func ValidateWithTests(
 					failed: $failed,
 					status: $status
 				}) {
+					validationRun {
+						id
+					}
 					errors {
 						message
 					}
@@ -70,14 +76,14 @@ func ValidateWithTests(
 		"failed":          failed,
 		"status":          status,
 	}, &payload); err != nil {
-		return err
+		return "", err
 	}
 
 	// Checks for errors
 	if err := CheckDataErrors(payload.ValidateBuildWithTests.Errors); err != nil {
-		return err
+		return "", err
 	}
 
-	// OK
-	return nil
+	// ID of the created validation run
+	return payload.ValidateBuildWithTests.ValidationRun.Id, nil
 }

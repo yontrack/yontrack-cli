@@ -35,6 +35,17 @@ Note that subcommands, dedicated to the most common types are also available. Fo
 
     yontrack validate -p PROJECT -b BRANCH -n BUILD -v VALIDATION tests --passed 1 --skipped 2 --failed 3
 
+Files can be attached as evidence to the validation run, once it is created
+(requires Yontrack 6.0):
+
+    yontrack validate -p PROJECT -b BRANCH -n BUILD -v VALIDATION -s PASSED \
+        --evidence trivy.pdf --evidence sbom.json \
+        --evidence-tool trivy --evidence-tool-version 0.56.2
+
+A missing evidence is an audit gap: when an evidence cannot be read, or is
+refused by Yontrack, the command fails - the validation run is recorded all the
+same once Yontrack has accepted it. With --evidence-optional, it only warns.
+
 Type 'yontrack validate --help' to get a list of all options.
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -91,6 +102,12 @@ Type 'yontrack validate --help' to get a list of all options.
 			return err
 		}
 
+		// Evidence
+		evidence, err := getValidateEvidence(cmd)
+		if err != nil {
+			return err
+		}
+
 		// Query
 		query := `
 			mutation CreateValidationRun(
@@ -115,6 +132,9 @@ Type 'yontrack validate --help' to get a list of all options.
 					data: $data,
 					runInfo: $runInfo
 				}) {
+					validationRun {
+						id
+					}
 					errors {
 						message
 					}
@@ -167,6 +187,9 @@ Type 'yontrack validate --help' to get a list of all options.
 		// Mutation payload
 		var payload struct {
 			CreateValidationRun struct {
+				ValidationRun struct {
+					Id string
+				}
 				Errors []struct {
 					Message string
 				}
@@ -183,8 +206,8 @@ Type 'yontrack validate --help' to get a list of all options.
 			return err
 		}
 
-		// OK
-		return nil
+		// Evidence
+		return evidence.attach(cmd, cfg, payload.CreateValidationRun.ValidationRun.Id)
 	},
 }
 
@@ -205,6 +228,9 @@ func init() {
 
 	// Run info arguments
 	InitRunInfoCommandFlags(validateCmd)
+
+	// Evidence arguments, for this command and all its subcommands
+	initValidateEvidenceFlags(validateCmd)
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:

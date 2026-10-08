@@ -104,6 +104,12 @@ An alternative syntax is:
 			}
 		}
 
+		// Evidence
+		evidence, err := getValidateEvidence(cmd)
+		if err != nil {
+			return err
+		}
+
 		// Get the configuration
 		cfg, err := config.GetSelectedConfiguration()
 		if err != nil {
@@ -113,6 +119,9 @@ An alternative syntax is:
 		// Mutation payload
 		var payload struct {
 			ValidateBuildWithMetrics struct {
+				ValidationRun struct {
+					Id string
+				}
 				Errors []struct {
 					Message string
 				}
@@ -139,6 +148,9 @@ An alternative syntax is:
 					runInfo: $runInfo,
 					metrics: $metrics
 				}) {
+					validationRun {
+						id
+					}
 					errors {
 						message
 					}
@@ -161,8 +173,8 @@ An alternative syntax is:
 			return err
 		}
 
-		// OK
-		return nil
+		// Evidence
+		return evidence.attach(cmd, cfg, payload.ValidateBuildWithMetrics.ValidationRun.Id)
 	},
 }
 

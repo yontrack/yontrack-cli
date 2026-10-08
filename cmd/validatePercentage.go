@@ -67,6 +67,12 @@ For example:
 			return err
 		}
 
+		// Evidence
+		evidence, err := getValidateEvidence(cmd)
+		if err != nil {
+			return err
+		}
+
 		// Get the configuration
 		cfg, err := config.GetSelectedConfiguration()
 		if err != nil {
@@ -76,6 +82,9 @@ For example:
 		// Mutation payload
 		var payload struct {
 			ValidateBuildWithPercentage struct {
+				ValidationRun struct {
+					Id string
+				}
 				Errors []struct {
 					Message string
 				}
@@ -102,6 +111,9 @@ For example:
 					runInfo: $runInfo,
 					value: $value
 				}) {
+					validationRun {
+						id
+					}
 					errors {
 						message
 					}
@@ -124,8 +136,8 @@ For example:
 			return err
 		}
 
-		// OK
-		return nil
+		// Evidence
+		return evidence.attach(cmd, cfg, payload.ValidateBuildWithPercentage.ValidationRun.Id)
 	},
 }
 

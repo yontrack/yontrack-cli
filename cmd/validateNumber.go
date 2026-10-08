@@ -76,6 +76,12 @@ would otherwise silently record a value of 0.
 			return err
 		}
 
+		// Evidence
+		evidence, err := getValidateEvidence(cmd)
+		if err != nil {
+			return err
+		}
+
 		// Get the configuration
 		cfg, err := config.GetSelectedConfiguration()
 		if err != nil {
@@ -107,6 +113,9 @@ would otherwise silently record a value of 0.
 		// Mutation payload
 		var payload struct {
 			CreateValidationRun struct {
+				ValidationRun struct {
+					Id string
+				}
 				Errors []struct {
 					Message string
 				}
@@ -135,6 +144,9 @@ would otherwise silently record a value of 0.
 					data: $data,
 					runInfo: $runInfo
 				}) {
+					validationRun {
+						id
+					}
 					errors {
 						message
 					}
@@ -149,8 +161,8 @@ would otherwise silently record a value of 0.
 			return err
 		}
 
-		// OK
-		return nil
+		// Evidence
+		return evidence.attach(cmd, cfg, payload.CreateValidationRun.ValidationRun.Id)
 	},
 }
 

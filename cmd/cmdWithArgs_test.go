@@ -15,7 +15,12 @@ func cmdWithArgs(t *testing.T, cmd *cobra.Command, args ...string) *cobra.Comman
 	t.Helper()
 	t.Cleanup(func() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
-			_ = f.Value.Set(f.DefValue)
+			// The default of a repeatable flag, "[]", is not a value to set
+			if slice, ok := f.Value.(pflag.SliceValue); ok {
+				_ = slice.Replace(nil)
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
 			f.Changed = false
 		})
 	})

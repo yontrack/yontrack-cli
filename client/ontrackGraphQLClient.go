@@ -23,23 +23,7 @@ func GraphQLCall(cfg *config.Config, query string, variables map[string]interfac
 		"variables": variables,
 	}
 
-	client := resty.New()
-	client.SetDebug(config.GraphQLLogging)
-	if cfg.Token != "" {
-		client.SetHeader("X-Ontrack-Token", cfg.Token)
-	} else if cfg.Username != "" {
-		client.SetBasicAuth(cfg.Username, cfg.Password)
-	}
-
-	if cfg.ConnectionRetry.MaxCount != 0 {
-		client.SetRetryCount(cfg.ConnectionRetry.MaxCount).
-			SetRetryMaxWaitTime(time.Duration(cfg.ConnectionRetry.MaxWaitTimeSec) * time.Second).
-			AddRetryCondition(func(r *resty.Response, err error) bool {
-				return err != nil || r.StatusCode() == http.StatusRequestTimeout || r.StatusCode() >= 500
-			})
-	}
-
-	resp, err := client.R().
+	resp, err := newClient(cfg).R().
 		SetHeader("Content-Type", "application/json").
 		SetBody(body).
 		Post(cfg.URL + "/graphql")
@@ -83,6 +67,27 @@ func GraphQLCall(cfg *config.Config, query string, variables map[string]interfac
 
 	// OK
 	return nil
+}
+
+// newClient is the HTTP client of the calls to Yontrack: its authentication
+// and its retries.
+func newClient(cfg *config.Config) *resty.Client {
+	client := resty.New()
+	client.SetDebug(config.GraphQLLogging)
+	if cfg.Token != "" {
+		client.SetHeader("X-Ontrack-Token", cfg.Token)
+	} else if cfg.Username != "" {
+		client.SetBasicAuth(cfg.Username, cfg.Password)
+	}
+
+	if cfg.ConnectionRetry.MaxCount != 0 {
+		client.SetRetryCount(cfg.ConnectionRetry.MaxCount).
+			SetRetryMaxWaitTime(time.Duration(cfg.ConnectionRetry.MaxWaitTimeSec) * time.Second).
+			AddRetryCondition(func(r *resty.Response, err error) bool {
+				return err != nil || r.StatusCode() == http.StatusRequestTimeout || r.StatusCode() >= 500
+			})
+	}
+	return client
 }
 
 type graphErr struct {

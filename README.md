@@ -785,6 +785,44 @@ Detected using the `GITLAB_CI` environment variable, which GitLab sets to `true`
 
 > See [GitLab CI](#gitlab-ci) for the pipeline these defaults are meant for.
 
+## Evidence
+
+> This flag requires Yontrack 6.0, with the audit trail enabled and an evidence storage configured.
+
+The `validate` commands, and all their subcommands, attach files as _evidence_ to the validation run they create - a scan report, an SBOM, a test summary - with `--evidence`, which can be repeated:
+
+```bash
+yontrack validate --project <project> --branch <branch> --build <build> --validation <validation> \
+    --evidence trivy.pdf \
+    --evidence sbom.json \
+    --evidence-tool trivy \
+    --evidence-tool-version 0.56.2 \
+    --evidence-source-url "$CI_JOB_URL" \
+    findings \
+        --format trivy \
+        --kind IMAGE \
+        --report trivy.json
+```
+
+* `--evidence` - path to a file to attach (repeatable)
+* `--evidence-tool` - tool which produced the evidence, like `trivy`
+* `--evidence-tool-version` - version of that tool
+* `--evidence-source-url` - where the evidence was produced, like the URL of the CI job (HTTP or HTTPS)
+* `--evidence-optional` - only warn, instead of failing, when an evidence is missing
+
+The tool, version and URL apply to every evidence of the command. The files are uploaded once the validation run is created, each with its SHA-256, which Yontrack checks against what it received. Yontrack records every attached evidence in the audit trail of the build.
+
+A missing evidence is an audit gap, so the command fails:
+
+* when an evidence file cannot be read, or is empty - before the validation run is created;
+* when Yontrack refuses an evidence - the storage is not configured, the file is too large, the licence does not allow it... The validation run is recorded all the same, and every evidence is still tried.
+
+With `--evidence-optional`, both only print a warning on stderr, and the command succeeds:
+
+```
+Warning: evidence trivy.pdf was not attached to validation run 55120: No evidence storage is configured. (audit-trail.evidence.storage-not-configured)
+```
+
 # Auto-versioning
 
 The Yontrack CLI can be used to set up the auto-versioning configuration for a branch.
@@ -997,6 +1035,44 @@ yontrack slot pipeline fail --pipeline 2957ff78-... --date 2026-09-15T14:45:00Z
 ```
 
 The date is given as `2026-09-15T14:30:00+02:00`, as `2026-09-15T14:30:00` - in UTC - or as `2026-09-15` - midnight UTC. Yontrack refuses a date in the future, before the creation of the build, before the previous change of the pipeline, or - for a start - before the start of the slot's latest pipeline.
+
+# Audit trail
+
+Yontrack 6.0 records the story of every build in an _audit trail_: an append-only list of entries, each one chained to the one before it by its hash, and endorsed by the Ed25519 key of the instance. The trail of a build is exported as a JSON file from its _Audit trail_ page.
+
+## Verifying an exported trail
+
+The CLI verifies an export offline - without calling Yontrack, so without trusting it:
+
+```bash
+yontrack audit-trail verify audit-trail-payments-release-2.4-2.4.7.json
+```
+
+The export holds everything needed: the entries, their endorsements and the public keys of the instance. For each entry, in order, the command checks that:
+
+* its seq is its position in the trail, from 1;
+* its hash is the SHA-256 of the [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) canonical JSON of its envelope (`schemaVersion`, `seq`, `type`, `time`, `actor`, `prevHash`, `payload`);
+* its `prevHash` is the hash of the entry before it - `null` for the first one;
+* the first entry is `build.created` or `trail.opened`, and names the build of the export;
+* each of its endorsements is the Ed25519 signature of its hash by a key of the export.
+
+It prints a report:
+
+```
+Trail of build payments / release-2.4 / 2.4.7 (ID 1042), exported at 2026-10-02T09:00:00.000Z
+Entries:      3
+Keys:         06e3fd8fda29bb60 (Ed25519)
+Start:        complete, opened by build.created
+Chain:        broken at seq 2, verified up to seq 1
+Endorsements: valid
+Problems:
+  seq 2  HASH  The hash of the entry is not the hash of its content.
+```
+
+and exits with a non-zero code when the chain is broken or an endorsement is invalid. Two cases are reported without failing:
+
+* a _partial_ trail, opened by `trail.opened` on a build which predates its trail - the trail starts at seq 1 on the time of that entry;
+* entries written while the instance key was not provisioned, which have no endorsement - the `Unendorsed` line gives the first of them.
 
 # Misc
 

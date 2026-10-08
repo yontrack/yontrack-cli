@@ -61,6 +61,11 @@ For example:
 			return err
 		}
 
+		evidence, err := getValidateEvidence(cmd)
+		if err != nil {
+			return err
+		}
+
 		passed, err := cmd.Flags().GetInt("passed")
 		if err != nil {
 			return err
@@ -83,7 +88,7 @@ For example:
 		}
 
 		// Call
-		return client.ValidateWithTests(
+		validationRunId, err := client.ValidateWithTests(
 			cfg,
 			project,
 			branch,
@@ -96,6 +101,12 @@ For example:
 			failed,
 			nil,
 		)
+		if err != nil {
+			return err
+		}
+
+		// Evidence
+		return evidence.attach(cmd, cfg, validationRunId)
 	},
 }
 

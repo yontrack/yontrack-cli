@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467
 	github.com/go-resty/resty/v2 v2.4.0
 	github.com/gobwas/glob v0.2.3
 	github.com/mitchellh/go-homedir v1.1.0

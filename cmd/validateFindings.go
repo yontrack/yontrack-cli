@@ -56,6 +56,12 @@ For example:
 			return err
 		}
 
+		// Evidence
+		evidence, err := getValidateEvidence(cmd)
+		if err != nil {
+			return err
+		}
+
 		// Get the configuration
 		cfg, err := config.GetSelectedConfiguration()
 		if err != nil {
@@ -65,6 +71,9 @@ For example:
 		// Mutation payload
 		var payload struct {
 			ValidateBuildWithFindings struct {
+				ValidationRun struct {
+					Id string
+				}
 				Errors []struct {
 					Message string
 				}
@@ -76,6 +85,9 @@ For example:
 		if err := client.GraphQLCall(cfg, `
 			mutation ValidateBuildWithFindings($input: ValidateBuildWithFindingsInput!) {
 				validateBuildWithFindings(input: $input) {
+					validationRun {
+						id
+					}
 					errors {
 						message
 					}
@@ -86,7 +98,12 @@ For example:
 		}
 
 		// Checks for errors
-		return client.CheckDataErrors(payload.ValidateBuildWithFindings.Errors)
+		if err := client.CheckDataErrors(payload.ValidateBuildWithFindings.Errors); err != nil {
+			return err
+		}
+
+		// Evidence
+		return evidence.attach(cmd, cfg, payload.ValidateBuildWithFindings.ValidationRun.Id)
 	},
 }
 
