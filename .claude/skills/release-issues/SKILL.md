@@ -93,23 +93,52 @@ Then ask for approval, and accept any of these answers:
 
 ## Step 5 — Apply, one issue at a time
 
-For each approved issue, in number order, run the three steps **in this order**. The comment goes on
-before the close, so the notification a subscriber gets carries the version.
+For each approved issue, in number order, read where it stands first:
 
 ```bash
-gh issue edit   {number} --add-label "status:released" --remove-label "status:ready"
-gh issue comment {number} --body "Available in $VERSION"
-gh issue close  {number}
+gh issue view {number} --json state,labels,comments --jq '
+  "state=\(.state)",
+  "labels=\([.labels[].name] | join(","))",
+  "commented=\([.comments[].body | select(. == "Available in '"$VERSION"'")] | length)"'
 ```
 
-- An issue carries exactly **one** `status:*` label, so `--add` and `--remove` always go in the same
-  command — never two.
+Then run the three steps **in this order**, each only if it is not done yet. The comment goes on
+before the close, so the notification a subscriber gets carries the version.
+
+1. **Labels**, building the one `gh issue edit` from what the issue carries:
+   - `--add-label "status:released"` only if it does not carry `status:released`
+   - `--remove-label "status:ready"` only if it carries `status:ready`
+   - neither needed → skip the edit
+
+   ```bash
+   gh issue edit {number} --add-label "status:released" --remove-label "status:ready"
+   ```
+
+   GitHub fails the whole edit with a generic `GraphQL: Something went wrong` when it is asked to
+   remove a label the issue does not carry, so never pass `--remove-label` blind.
+2. **Comment**, only if `commented=0`:
+
+   ```bash
+   gh issue comment {number} --body "Available in $VERSION"
+   ```
+3. **Close**, only if `state=OPEN`:
+
+   ```bash
+   gh issue close {number}
+   ```
+
+- An issue carries exactly **one** `status:*` label, so when both `--add` and `--remove` are needed
+  they go in the same command — never two.
 - The comment body is exactly `Available in <version>`, no decoration, no trailer, no link. It is a
   marker people grep for.
 - Close with no `--reason`; these are completed, which is `gh`'s default.
 
-If any one of the three fails for an issue, **stop the whole run** and report which issue is now
-half-done and which of the three steps completed. Do not carry on and leave a trail of issues in
+Checking first is what makes a run safe to repeat: re-running it on a half-done issue finishes it,
+and an issue already done is left alone.
+
+If any one of the three fails for an issue, **stop the whole run**. A failed `gh issue edit` can still
+have applied part of the change, so re-read the issue with the `gh issue view` above and report what
+it actually carries, not which commands succeeded. Do not carry on and leave a trail of issues in
 mixed states.
 
 ---
@@ -139,7 +168,9 @@ Step 4 that the operator may still want to fix.
 ## Guardrails
 
 - **Never** invent the version — it comes from `$ARGUMENTS` or from the operator
-- **Never** touch an issue that is not `status:ready`, and never reopen or relabel a closed one
+- **Never** touch an issue that is not `status:ready`, and never reopen or relabel a closed one. The
+  one exception is an issue the operator approved in this run and a failed step left half-done: it
+  may have lost `status:ready` already, and Step 5 finishes it once the operator says to retry
 - **Never** close an issue whose comment or label step failed
 - **Never** widen the query past open `status:ready` issues
 - **Never** cut a tag, push, or edit a release from this skill — see [`RELEASING.md`](../../../RELEASING.md)
